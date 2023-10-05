@@ -1,0 +1,398 @@
+---
+title: "motif analysis"
+output: "motif-x tables and sequence logos"
+date: '2022-11-04'
+---
+
+
+``` {r}
+#######################################################################################################################################
+# Notebook 3 - DESCRIPTION
+#
+# Here we analyse the phosphoproteome for amino acid motifs
+# Motifs are looked for in subsections of the data - sites which change in abundance in a particular direction, changing proportionally (prop) to or inversly proportionally (invprop) to temperature.
+# Motif-x is used for initial analysis, but enrichment-depletion sequence logos are used in the paper
+#
+#Logos should be exported as as 5x3 inch, landscape, by viewing in console.
+#######################################################################################################################################
+```
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+require('rmotifx')
+require('ggplot2') 
+# require('seqlogo')
+# require('ggseqlogo')
+require('dagLogo')
+require('dplyr')
+
+writeFasta<-function(data, filename){
+  fastaLines = c()
+  for (rowNum in 1:nrow(data)){
+    fastaLines = c(fastaLines, as.character(paste(">", data[rowNum,"bg.names"], sep = "")))
+    fastaLines = c(fastaLines,as.character(data[rowNum,"bg.seqs"]))
+  }
+  fileConn<-file(filename)
+  writeLines(fastaLines, fileConn)
+  close(fileConn)
+}
+
+```
+
+
+```{r import}
+# Clear your workspace
+rm(list=ls())
+
+hphos_unnormjo <- read.csv("/Processed data/2human_phos_SLnorm_data.csv")
+mphos_unnormjo <- read.csv("/Processed data/2mouse_phos_SLnorm_data.csv")
+
+###NB identifying background is important as is which sites to include in your foreground. background_hphosunnorm is every site detected which change in any direction. When you use this background, significant hits in human falls vs when the background is set as the sites in the three other 'directionality' quadrants i.e. all sites - your foreground. You can recover signficance to see broadly the similar logos if the pval cutoff for the dagLogo is set at 0.1. Currently, the script is set for the remaining three quadrants as the background, with pval 0.05. 
+
+#setting up foreground and background
+significant_hphosunnorm_prop <-
+  hphos_unnormjo %>%
+  subset(upfcmean_log2 > 0 & downfcmean_log2 < 0)
+significant_hphosunnorm_invprop <-
+  hphos_unnormjo %>%
+  subset(upfcmean_log2 < 0 & downfcmean_log2 > 0)
+background_hphosunnorm_bgprop <-
+  hphos_unnormjo %>%
+  subset(direction > 0 | upfcmean_log2 < 0 & downfcmean_log2 > 0)
+background_hphosunnorm_bginv <-
+  hphos_unnormjo %>%
+  subset(direction > 0 | upfcmean_log2 > 0 & downfcmean_log2 < 0)
+background_hphosunnorm <-
+  hphos_unnormjo
+
+significant_mphosunnorm_prop <-
+  mphos_unnormjo %>%
+  subset(upfcmean_log2 > 0 & downfcmean_log2 < 0)
+significant_mphosunnorm_invprop <-
+  mphos_unnormjo %>%
+  subset(upfcmean_log2 < 0 & downfcmean_log2 > 0)
+background_mphosunnorm_bgprop <-
+  mphos_unnormjo %>%
+  subset(direction > 0 | upfcmean_log2 < 0 & downfcmean_log2 > 0 )
+background_mphosunnorm_bginv <-
+  mphos_unnormjo %>%
+  subset(direction > 0  | upfcmean_log2 > 0 & downfcmean_log2 < 0 )
+background_mphosunnorm <-
+  mphos_unnormjo
+
+```
+
+
+```{r human prop}
+
+# Read in sequences
+fg.seqs = as.character(significant_hphosunnorm_prop$Sequence.window)
+fg.seqs = substr(fg.seqs, 6, 26) #1, 31
+fg.seqs <- gsub("_", "X", fg.seqs)
+bg.seqs = as.character(background_hphosunnorm_bgprop$Sequence.window)
+bg.seqs = substring(bg.seqs,6, 26)
+bg.seqs <- gsub("_", "X", bg.seqs)
+bg.names = as.character(background_hphosunnorm_bgprop$Leading.proteins)
+
+X <- data.frame(bg.names, bg.seqs)
+writeFasta(X, "example.fasta")
+
+##MotifX
+#exploring signif parameters to match daglogo. Original was min seqs 5, pval 5e-2
+mot = motifx(fg.seqs, bg.seqs, central.res = 'STY', min.seqs = 10, pval.cutoff = 5e-2)
+print(mot)
+
+
+##Sequence logo
+
+dat <- unlist(fg.seqs)
+
+##prepare proteome from a fasta file
+proteome <- prepareProteome(fasta = "example.fasta", 
+                            species = "Homo sapiens")
+
+##prepare an object of dagPeptides
+seq <- formatSequence(seq = dat, proteome = proteome, upstreamOffset = 10,
+                      downstreamOffset = 10)
+
+bg_fisher <- buildBackgroundModel(seq, background = "wholeProteome", 
+                                  proteome = proteome, testType = "fisher")
+bg_ztest <- buildBackgroundModel(seq, background = "wholeProteome", 
+                                 proteome = proteome, testType = "ztest")
+
+t0 <- testDAU(dagPeptides = seq, dagBackground = bg_fisher)
+
+dagLogo(t0, type=c("diff"), pvalueCutoff=0.05, font="Helvetica", fontface = "plain", fontsize = 8, legend=F)
+
+
+```
+
+```{r human inv}
+
+# Read in sequences
+fg.seqs = as.character(significant_hphosunnorm_invprop$Sequence.window)
+fg.seqs = substr(fg.seqs,6, 26)
+fg.seqs <- gsub("_", "X", fg.seqs)
+bg.seqs = as.character(background_hphosunnorm_bginv$Sequence.window)
+bg.seqs = substring(bg.seqs,6, 26)
+bg.seqs <- gsub("_", "X", bg.seqs)
+bg.names = as.character(background_hphosunnorm_bginv$Leading.proteins)
+
+X <- data.frame(bg.names, bg.seqs)
+writeFasta(X, "example.fasta")
+
+##MotifX
+mot = motifx(fg.seqs, bg.seqs, central.res = 'STY', min.seqs = 10, pval.cutoff = 5e-2)
+print(mot)
+
+##Sequence logo
+
+dat <- unlist(fg.seqs)
+
+##prepare proteome from a fasta file
+proteome <- prepareProteome(fasta = "example.fasta", 
+                            species = "Homo sapiens")
+
+##prepare an object of dagPeptides
+seq <- formatSequence(seq = dat, proteome = proteome, upstreamOffset = 10,
+                      downstreamOffset = 10)
+
+bg_fisher <- buildBackgroundModel(seq, background = "wholeProteome", 
+                                  proteome = proteome, testType = "fisher")
+bg_ztest <- buildBackgroundModel(seq, background = "wholeProteome", 
+                                 proteome = proteome, testType = "ztest")
+
+t0 <- testDAU(dagPeptides = seq, dagBackground = bg_fisher)
+
+dagLogo(t0, type=c("diff"), pvalueCutoff=0.05, font="Helvetica", fontface = "plain", fontsize = 8, legend=F)
+
+```
+
+```{r mouse prop}
+
+# Read in sequences
+fg.seqs = as.character(significant_mphosunnorm_prop$Sequence.window)
+fg.seqs = substr(fg.seqs,6,26) #1, 31
+fg.seqs <- gsub("_", "X", fg.seqs)
+bg.seqs = as.character(background_mphosunnorm_bgprop$Sequence.window) #_bgprop
+bg.seqs = substring(bg.seqs,6,26)
+bg.seqs <- gsub("_", "X", bg.seqs)
+bg.names = as.character(background_mphosunnorm_bgprop$Leading.proteins)
+
+X <- data.frame(bg.names, bg.seqs)
+writeFasta(X, "example.fasta")
+
+##MotifX
+mot = motifx(fg.seqs, bg.seqs, central.res = 'STY', min.seqs = 10, pval.cutoff = 5e-2)
+print(mot)
+
+
+##Sequence logo
+
+dat <- unlist(fg.seqs)
+
+##prepare proteome from a fasta file
+proteome <- prepareProteome(fasta = "example.fasta", 
+                            species = "Mus musculus")
+
+##prepare an object of dagPeptides
+seq <- formatSequence(seq = dat, proteome = proteome, upstreamOffset = 10,
+                      downstreamOffset = 10)
+
+bg_fisher <- buildBackgroundModel(seq, background = "wholeProteome", 
+                                  proteome = proteome, testType = "fisher")
+bg_ztest <- buildBackgroundModel(seq, background = "wholeProteome", 
+                                 proteome = proteome, testType = "ztest")
+
+t0 <- testDAU(dagPeptides = seq, dagBackground = bg_fisher)
+t2 <- testDAU(dagPeptides = seq, dagBackground = bg_fisher, 
+             groupingScheme = "charge_group")
+
+dagLogo(t0, type=c("diff"), pvalueCutoff=0.05, font="Helvetica", fontface = "plain", fontsize = 8, legend=F)
+
+```
+
+
+```{r mouse inv}
+
+# Read in sequences
+fg.seqs = as.character(significant_mphosunnorm_invprop$Sequence.window)
+fg.seqs = substr(fg.seqs,6, 26)
+fg.seqs <- gsub("_", "X", fg.seqs)
+bg.seqs = as.character(background_mphosunnorm_bginv$Sequence.window)
+bg.seqs = substring(bg.seqs,6, 26)
+bg.seqs <- gsub("_", "X", bg.seqs)
+bg.names = as.character(background_mphosunnorm_bginv$Leading.proteins)
+
+X <- data.frame(bg.names, bg.seqs)
+writeFasta(X, "example.fasta")
+
+##MotifX
+mot = motifx(fg.seqs, bg.seqs, central.res = 'STY', min.seqs = 10, pval.cutoff = 5e-2)
+print(mot)
+
+
+##Sequence logo
+
+dat <- unlist(fg.seqs)
+
+##prepare proteome from a fasta file
+proteome <- prepareProteome(fasta = "example.fasta", 
+                            species = "Mus musculus")
+
+##prepare an object of dagPeptides
+seq <- formatSequence(seq = dat, proteome = proteome, upstreamOffset = 10,
+                      downstreamOffset = 10)
+
+bg_fisher <- buildBackgroundModel(seq, background = "wholeProteome", 
+                                  proteome = proteome, testType = "fisher")
+bg_ztest <- buildBackgroundModel(seq, background = "wholeProteome", 
+                                 proteome = proteome, testType = "ztest")
+
+t0 <- testDAU(dagPeptides = seq, dagBackground = bg_fisher)
+t2 <- testDAU(dagPeptides = seq, dagBackground = bg_fisher, 
+             groupingScheme = "charge_group")
+
+dagLogo(t0, type=c("diff"), pvalueCutoff=0.05, font="Helvetica", fontface = "plain", fontsize = 8, legend=F)
+
+```
+
+
+```{r combining datasets , echo=F}
+#The following sections were exploratory analysis to to examine if any shared motifs occur in the same direction or opposite direction, and were not used in the paper. They remain here for transparency.
+
+
+#both fg
+bprop <- rbind(hprop, mprop)
+binv <- rbind(hinv, minv)
+bpropinv <- rbind(hprop, minv)
+binvprop <- rbind(hinv, mprop)
+
+#both backgrounds
+bpropbg <- rbind(hpropbg, mpropbg)
+binvbg <- rbind(hinvbg, minvbg)
+bpropinvbg <- rbind(hpropbg, minvbg)
+binvpropbg <- rbind(hinvbg, mpropbg)
+
+```
+
+
+```{r both inv}
+
+# binv
+# Read in sequences
+fg.seqs = as.character(binv$Sequence.window)
+fg.seqs = substr(fg.seqs,1,31)
+bg.seqs = as.character(binvbg$Sequence.window)
+bg.seqs = substring(bg.seqs,1,31)
+bg.seqs <- gsub("_", "X", bg.seqs)
+bg.names = as.character(binvbg$Leading.proteins)
+
+X <- data.frame(bg.names, bg.seqs)
+writeFasta(X, "example.fasta")
+
+##MotifX
+mot = motifx(fg.seqs, bg.seqs, central.res = 'STY', min.seqs = 5, pval.cutoff = 5e-2)
+print(mot)
+
+
+##Sequence logo
+
+dat <- unlist(fg.seqs)
+
+##prepare proteome from a fasta file
+proteome <- prepareProteome(fasta = "example.fasta", 
+                            species = "Mus musculus")
+
+##prepare an object of dagPeptides
+seq <- formatSequence(seq = dat, proteome = proteome, upstreamOffset = 15,
+                      downstreamOffset = 15)
+
+bg_fisher <- buildBackgroundModel(seq, background = "wholeProteome", 
+                                  proteome = proteome, testType = "fisher")
+bg_ztest <- buildBackgroundModel(seq, background = "wholeProteome", 
+                                 proteome = proteome, testType = "ztest")
+
+t0 <- testDAU(dagPeptides = seq, dagBackground = bg_ztest)
+dagLogo(t0)
+
+```
+
+
+```{r both prop}
+
+# bprop
+fg.seqs = as.character(bprop$Sequence.window)
+fg.seqs = substr(fg.seqs,1,31)
+bg.seqs = as.character(bpropbg$Sequence.window)
+bg.seqs = substring(bg.seqs,1,31)
+
+mot = motifx(fg.seqs, bg.seqs, central.res = 'STY', min.seqs = 5, pval.cutoff = 1e-3)
+print(mot)
+
+##Sequence logo
+
+dat <- unlist(fg.seqs)
+
+##prepare proteome from a fasta file
+proteome <- prepareProteome(fasta = "example.fasta", 
+                            species = "Mus musculus")
+
+##prepare an object of dagPeptides
+seq <- formatSequence(seq = dat, proteome = proteome, upstreamOffset = 15,
+                      downstreamOffset = 15)
+
+bg_fisher <- buildBackgroundModel(seq, background = "wholeProteome", 
+                                  proteome = proteome, testType = "fisher")
+bg_ztest <- buildBackgroundModel(seq, background = "wholeProteome", 
+                                 proteome = proteome, testType = "ztest")
+
+t0 <- testDAU(dagPeptides = seq, dagBackground = bg_ztest)
+dagLogo(t0)
+
+```
+
+
+```{r h prop m inv}
+
+# bpropinv
+# Read in sequences
+fg.seqs = as.character(bpropinv$Sequence.window)
+fg.seqs = substr(fg.seqs,1,31)
+bg.seqs = as.character(bpropinvbg$Sequence.window)
+bg.seqs = substring(bg.seqs,1,31)
+bg.seqs <- gsub("_", "X", bg.seqs)
+bg.names = as.character(bpropinvbg$Leading.proteins)
+
+X <- data.frame(bg.names, bg.seqs)
+writeFasta(X, "example.fasta")
+
+##MotifX
+mot = motifx(fg.seqs, bg.seqs, central.res = 'STY', min.seqs = 5, pval.cutoff = 5e-2)
+print(mot)
+
+
+##Sequence logo
+
+dat <- unlist(fg.seqs)
+
+##prepare proteome from a fasta file
+proteome <- prepareProteome(fasta = "example.fasta", 
+                            species = "Mus musculus")
+
+##prepare an object of dagPeptides
+seq <- formatSequence(seq = dat, proteome = proteome, upstreamOffset = 15,
+                      downstreamOffset = 15)
+
+bg_fisher <- buildBackgroundModel(seq, background = "wholeProteome", 
+                                  proteome = proteome, testType = "fisher")
+bg_ztest <- buildBackgroundModel(seq, background = "wholeProteome", 
+                                 proteome = proteome, testType = "ztest")
+
+t0 <- testDAU(dagPeptides = seq, dagBackground = bg_ztest)
+dagLogo(t0)
+
+```
+

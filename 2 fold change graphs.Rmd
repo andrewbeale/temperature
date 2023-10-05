@@ -1,0 +1,192 @@
+---
+title: "Fold change graphs"
+output: "Graphs showing fold change for proteome and phosphoproteome according to conditions"
+---
+
+```{r}
+#######################################################################################################################################
+# Notebook 2 - DESCRIPTION
+#
+# Here we plot fold changes for shift experiments
+#
+# INPUTS = all normalised data (.csv)
+# OUTPUTS = graphs (.pdf)
+# 
+#######################################################################################################################################
+```
+
+```{r, workspace and packages}
+# Setup
+# Clear your workspace
+rm(list=ls())
+
+# Load useful packages
+if (!require("tidyverse")) {
+  install.packages("tidyverse", dependencies = TRUE)
+  library(tidyverse)
+}
+
+if (!require("dplyr")) {
+  install.packages("dplyr", dependencies = TRUE)
+  library(dplyr)
+}
+
+if (!require("tidyr")) {
+  install.packages("tidyr", dependencies = TRUE)
+  library(tidyr)
+}
+
+if (!require("stringr")) {
+  install.packages("stringr", dependencies = TRUE)
+  library(stringr)
+}
+
+if (!require("magrittr")) {
+  install.packages("magrittr", dependencies = TRUE)
+  library(magrittr)
+}
+
+if (!require("ggplot2")) {
+  install.packages("ggplot2", dependencies = TRUE)
+  library(ggplot2)
+}
+
+```
+
+```{r, files import}
+#make a list of all the .csv files in your working directory just so you can see what's going on
+X = list.files(".",".csv")
+
+# imac /andrewbeale/Nextcloud22/
+# macbook /andrew/Nextcloud/
+
+hphos <- read.csv("./Processed data/2human_phos_SLnorm_data.csv")
+mphos <- read.csv("./Processed data/2mouse_phos_SLnorm_data.csv")
+hprot <- read.csv("./Processed data/2human_prot_SLnorm_data.csv")
+mprot <- read.csv("./Processed data/2mouse_prot_SLnorm_data.csv")
+
+hphos_unnormjo <- hphos
+mphos_unnormjo <- mphos
+
+```
+
+```{r, shift phosphoproteome plots}
+plot <- function(x){
+  x %>%
+  # Plot with points coloured according to the threshold
+  ggplot(aes(upfcmean_log2,downfcmean_log2)) +
+  geom_hline(yintercept=0, linetype = "dashed",
+                color = "black", size=0.5) +
+  geom_vline(xintercept=0, linetype = "dashed", 
+                color = "black", size=0.5) +
+  geom_point(colour = "grey", shape = 16, alpha = 0.5, size = 0.5) + 
+  xlab("log2FCup") + ylab("log2FCdown") +  
+  theme_classic(base_size = 10) +
+  theme(legend.position="none")
+}
+
+significant_hphosunnorm_prop <- 
+  hphos_unnormjo %>%
+  subset(upfcmean_log2 > 0 & downfcmean_log2 < 0 & upfcvsdownfc_discovery == "Yes")
+significant_hphosunnorm_invprop <- 
+  hphos_unnormjo %>%
+  subset(upfcmean_log2 < 0 & downfcmean_log2 > 0 & upfcvsdownfc_discovery == "Yes")
+background_hphosunnorm <- 
+  hphos_unnormjo %>%
+  subset(upfcvsdownfc_discovery == "No" | direction > 0 & upfcvsdownfc_discovery == "Yes")
+
+hshift <- plot(background_hphosunnorm) + 
+  geom_point(data=significant_hphosunnorm_prop, aes(upfcmean_log2,downfcmean_log2), colour = "#018080", shape = 16, alpha = 0.5, size = 0.5) +
+  geom_point(data=significant_hphosunnorm_invprop, aes(upfcmean_log2,downfcmean_log2), colour = "#89138A", shape = 16, alpha = 0.5, size = 0.5) + 
+  xlim(-1.3, 2) + ylim (-1.3,1.1)
+#ts "#E6BB18"
+
+hshift
+ggsave("./Plots/hshiftunnorm_sig.pdf", width = 2, height = 2, dpi = 300)
+
+significant_mphosunnorm_prop <- 
+  mphos_unnormjo %>%
+  subset(upfcmean_log2 > 0 & downfcmean_log2 < 0 & upfcvsdownfc_discovery == "Yes")
+significant_mphosunnorm_invprop <- 
+  mphos_unnormjo %>%
+  subset(upfcmean_log2 < 0 & downfcmean_log2 > 0 & upfcvsdownfc_discovery == "Yes")
+background_mphosunnorm <- 
+  mphos_unnormjo %>%
+  subset(upfcvsdownfc_discovery == "No" | direction > 0 & upfcvsdownfc_discovery == "Yes")
+
+mshift <- plot(background_mphosunnorm) + 
+  geom_point(data=significant_mphosunnorm_prop, aes(upfcmean_log2,downfcmean_log2), colour = "#018080", shape = 16, alpha = 0.5, size = 0.5) +
+  geom_point(data=significant_mphosunnorm_invprop, aes(upfcmean_log2,downfcmean_log2), colour = "#89138A", shape = 16, alpha = 0.5, size = 0.5)  + 
+  xlim(-1.3, 2) + ylim (-1.3,1.1)
+
+mshift
+ggsave("./Plots/mshiftunnorm_sig3.pdf", width = 2, height = 2, dpi = 300,)
+
+```
+
+```{r, shift proteome}
+
+plot <- function(x){
+  x %>%
+  # Plot with points coloured according to the threshold
+  ggplot(aes(upfcmean_log2,downfcmean_log2)) +
+  geom_hline(yintercept=0, linetype = "dashed",
+                color = "black", size=0.5) +
+  geom_vline(xintercept=0, linetype = "dashed", 
+                color = "black", size=0.5) +
+  geom_point(colour = "grey", shape = 16, alpha = 0.5, size = 0.5) + 
+  xlab("log2FCup") + ylab("log2FCdown") +  
+  theme_classic(base_size = 10) +
+  theme(legend.position="none")
+}
+
+significant_hprot_prop <- 
+  hprot %>%
+  subset(upfcmean_log2 > 0 & downfcmean_log2 < 0 & upfcvsdownfc_discovery == "Yes")
+significant_hprot_inv <- 
+  hprot %>%
+  subset(upfcmean_log2 < 0 & downfcmean_log2 > 0 & upfcvsdownfc_discovery == "Yes")
+background_hprot <- 
+  hprot %>%
+  subset(upfcvsdownfc_discovery == "No" | direction > 0 & upfcvsdownfc_discovery == "Yes")
+
+hprotshift <- plot(background_hprot) + 
+  geom_point(data=significant_hprot_prop, aes(upfcmean_log2,downfcmean_log2), colour = "#018080", shape = 16, alpha = 0.5, size = 0.5) +
+  geom_point(data=significant_hprot_inv, aes(upfcmean_log2,downfcmean_log2), colour = "#89138A", shape = 16, alpha = 0.5, size = 0.5) + 
+  xlim(-1.3, 2.55) + ylim (-1.5,2.05)
+#ts "#E6BB18"
+
+hprotshift
+ggsave("./Plots/hprotshift_sig.pdf", width = 2, height = 2, dpi = 300)
+
+significant_mprot_prop <- 
+  mprot %>%
+  subset(upfcmean_log2 > 0 & downfcmean_log2 < 0 & upfcvsdownfc_discovery == "Yes")
+significant_mprot_inv <- 
+  mprot %>%
+  subset(upfcmean_log2 < 0 & downfcmean_log2 > 0 & upfcvsdownfc_discovery == "Yes")
+background_mprot <- 
+  mprot %>%
+  subset(upfcvsdownfc_discovery == "No" | direction > 0 & upfcvsdownfc_discovery == "Yes")
+
+mprotshift <- plot(background_mprot) + 
+  geom_point(data=significant_mprot_prop, aes(upfcmean_log2,downfcmean_log2), colour = "#018080", shape = 16, alpha = 0.5, size = 0.5) +
+  geom_point(data=significant_mprot_inv, aes(upfcmean_log2,downfcmean_log2), colour = "#89138A", shape = 16, alpha = 0.5, size = 0.5) + 
+  xlim(-1.3, 2.55) + ylim (-1.5,2.05)
+#ts "#E6BB18"
+
+mprotshift
+ggsave("./Plots/mprotshift_sig.pdf", width = 2, height = 2, dpi = 300,)
+
+
+
+
+```
+
+
+```{r, x}
+
+
+  
+
+```

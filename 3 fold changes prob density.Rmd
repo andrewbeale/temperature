@@ -1,0 +1,132 @@
+---
+title: "probability density"
+output: pdf
+date: '2023-01-31'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#######################################################################################################################################
+# Combined analysis Notebook 3 - DESCRIPTION
+#
+# Here we plot probability density for shift and adapt experiments, to compare overall phosphorylation mouse vs human
+#
+# INPUTS = SL normalised data + statistics from Prism (.csv)
+# OUTPUTS = graphs (.pdf)
+# 
+####################################################################################################################################
+
+```
+
+
+```{r setup}
+#clear your workspace
+rm(list=ls())
+
+#Load useful packages
+if (!require("tidyverse")) {
+  install.packages("tidyverse", dependencies = TRUE)
+  library(tidyverse)
+}
+if (!require("ggplot2")) {
+  install.packages("ggplot2", dependencies = TRUE)
+  library(ggplot2)
+}
+if (!require("gridExtra")) {
+  install.packages("gridExtra", dependencies = TRUE)
+  library(gridExtra)
+}
+
+#import
+humanphos<- read.csv("./Processed data/2human_phos_SLnorm_data.csv")
+mousephos <- read.csv("./Processed data/2mouse_phos_SLnorm_data.csv")
+humanprot<- read.csv("./Processed data/2human_prot_SLnorm_data.csv")
+mouseprot <- read.csv("./Processed data/2mouse_prot_SLnorm_data.csv")
+
+#function to plot
+axis_colour = "grey85"
+axis_text_size = 10
+
+plottheme <- theme(axis.line = element_line(),
+        axis.text.x = element_text(color = "black", size = axis_text_size, vjust = 0),
+        #axis.title.y = element_blank(), 
+        axis.text.y = element_text(color = "black", size = axis_text_size),
+        #axis.ticks.y = element_blank(),
+        panel.grid = element_blank(),
+        panel.border = element_blank(),
+        plot.background = element_rect(fill="transparent"),
+        panel.background = element_rect(fill = "transparent"),
+        legend.box.background = element_blank(),
+        legend.text = element_text(size = 8))
+
+
+colours <- c("Human"="#ff8000", "Mouse"="#333333")
+
+```
+
+```{r Phosphoproteomics prob dens}
+
+#phosphoproteomics
+
+wilcox.test(humanphos$hvlfcmean_log2, mousephos$hvlfcmean_log2)
+pvalphosadapt <- wilcox.test(humanphos$hvlfcmean_log2, mousephos$hvlfcmean_log2)$p.value
+fcpb_phosadapt <- ggplot() + 
+    geom_density(aes(x = (humanphos$hvlfcmean_log2), fill = "Human"),
+                color = "black", alpha = 0.5) +
+    geom_density(aes(x = (mousephos$hvlfcmean_log2), fill = "Mouse"),
+               color = "black", alpha = 0.5) +
+  scale_fill_manual(name = "", values = colours) +
+  scale_x_continuous(trans="log") + 
+  labs(y = "Probability density", title='37-32 phospho adapt', x="Log FC", subtitle=paste("pval=", pvalphosadapt, "; Human", round(median(humanphos$hvlfcmean_log2), 4), "; Mouse", round(median(mousephos$hvlfcmean_log2), 6))) + plottheme + xlim(-1.5, 1.5)
+fcpb_phosadapt
+ggsave("./Plots/fcpb_phosadapt.pdf", plot=fcpb_phosadapt, width = 4, height = 2, units = "in", dpi = 300,)
+
+wilcox.test(humanphos$upfcdownfcmean_log2, mousephos$upfcdownfcmean_log2)
+pvalphosud <- wilcox.test(humanphos$upfcdownfcmean_log2, mousephos$upfcdownfcmean_log2)$p.value
+fcpb_phosud <- ggplot() + 
+    geom_density(aes(x = (humanphos$upfcdownfcmean_log2), fill = "Human"),
+                color = "black", alpha = 0.5) +
+    geom_density(aes(x = (mousephos$upfcdownfcmean_log2), fill = "Mouse"),
+               color = "black", alpha = 0.5) +
+  scale_fill_manual(name = "", values = colours) +
+  scale_x_continuous(trans="log") + 
+  labs(y = "Probability density", title='up/down phospho', x="Log FC", subtitle=paste("pval=", pvalphosud, "; Human", round(median(humanphos$upfcdownfcmean_log2), 4), "; Mouse", round(median(mousephos$upfcdownfcmean_log2), 4))) + plottheme + xlim(-1.5, 1.5)
+fcpb_phosud
+ggsave("./Plots/fcpb_phosupdown.pdf", plot=fcpb_phosud, width = 4, height = 2, units = "in", dpi = 300,)
+
+```
+
+
+
+```{r Proteomics prob dens}
+#proteomics
+
+wilcox.test(humanprot$hvlfcmean_log2, mouseprot$hvlfcmean_log2)
+pvalprotadapt <- wilcox.test(humanprot$hvlfcmean_log2, mouseprot$hvlfcmean_log2)$p.value
+fcpb_protadapt <- ggplot() + 
+    geom_density(aes(x = (humanprot$hvlfcmean_log2), fill = "Human"),
+                color = "black", alpha = 0.5) +
+    geom_density(aes(x = (mouseprot$hvlfcmean_log2), fill = "Mouse"),
+               color = "black", alpha = 0.5) +
+  scale_fill_manual(name = "", values = colours) +
+  scale_x_continuous(trans="log") + 
+  labs(y = "Probability density", title='37-32 proteome adapt', x="Log FC", subtitle=paste("pval=", pvalprotadapt, "; Human", round(median(humanprot$hvlfcmean_log2), 4), "; Mouse", round(median(mouseprot$hvlfcmean_log2), 6))) + plottheme + xlim(-1.5, 1.5)
+fcpb_protadapt
+ggsave("./Plots/fcpb_protadapt.pdf", plot=fcpb_protadapt, width = 4, height = 2, units = "in", dpi = 300,)
+
+wilcox.test(humanprot$upfcdownfcmean_log2, mouseprot$upfcdownfcmean_log2)
+pvalprotud <- wilcox.test(humanprot$upfcdownfcmean_log2, mouseprot$upfcdownfcmean_log2)$p.value
+fcpb_protud <- ggplot() + 
+    geom_density(aes(x = (humanprot$upfcdownfcmean_log2), fill = "Human"),
+                color = "black", alpha = 0.5) +
+    geom_density(aes(x = (mouseprot$upfcdownfcmean_log2), fill = "Mouse"),
+               color = "black", alpha = 0.5) +
+  scale_fill_manual(name = "", values = colours) +
+  scale_x_continuous(trans="log") + 
+  labs(y = "Probability density", title='up/down proteome', x="Log FC", subtitle=paste("pval=", pvalprotud, "; Human", round(median(humanprot$upfcdownfcmean_log2), 4), "; Mouse", round(median(mouseprot$upfcdownfcmean_log2), 4))) + plottheme + xlim(-1.5, 1.5)
+fcpb_protud
+ggsave("./Plots/fcpb_protupdown.pdf", plot=fcpb_protud, width = 4, height = 2, units = "in", dpi = 300,)
+
+```
+
+

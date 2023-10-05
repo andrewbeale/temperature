@@ -1,0 +1,327 @@
+---
+title: "Sample loading normalisation - proteome"
+output: "Sample loading-normalised proteome data"
+---
+
+```{r}
+#######################################################################################################################################
+# Notebook 1 - DESCRIPTION
+#
+# Here we take the raw proteomics data (output of Perseus without NA-filtering).
+# We apply sample loading normalisation to correct for small errors in pipetting - this assumes equal protein was used for all samples submitted for TMT labelling.
+# Along the way we plot the data to make sure that we can spot obvious mistakes.
+# Finally, we export the data because this is handy for plotting proteins of interest in other software!
+#
+# INPUTS = raw data from Perseus (.txt)
+# OUTPUTS = normalised data for further analysis (.csv)
+#
+# This code has been adapted from David Wong https://github.com/davwong47/Circadian-proteomics
+#######################################################################################################################################
+```
+
+```{r setup and import data}
+#setup
+
+# Clear your workspace
+rm(list=ls())
+
+# Load useful packages
+if (!require("tidyverse")) {
+  install.packages("tidyverse", dependencies = TRUE)
+  library(tidyverse)
+} 
+
+if (!require("BiocManager")) {
+  install.packages("BiocManager", dependencies = TRUE)
+}
+
+if (!require("edgeR")) {
+  BiocManager::install("edgeR")
+  library(edgeR)
+} 
+
+if (!require("psych")) {
+  install.packages("psych", dependencies = TRUE)
+  library(psych)
+} 
+
+if (!require("dplyr")) {
+  install.packages("dplyr", dependencies = TRUE)
+  library(dplyr)
+} 
+
+
+# Make a list of all the .txt files in your working directory just so you can see what's going on
+X = list.files(".",".txt")
+
+# read the raw data file, and ensure "NaN" is interpreted as NA
+mdata_start <- read.delim("./Raw data/CRM5913_TMT12_mouse_prot_m12.txt", na = c("NaN"), stringsAsFactors = F)
+mdata_start <- mdata_start[-1,] # Remove the first row which is just junk
+mdata_start[, 1:12] <- sapply(mdata_start[,1:12], as.numeric) # Make the data numeric
+
+hdata_start <- read.delim("./Raw data/CRM5913_TMT16_human_prot_m13.txt", na = c("NaN"), stringsAsFactors = F)
+hdata_start <- hdata_start[-1,] # Remove the first row which is just junk
+hdata_start[, 1:12] <- sapply(hdata_start[,1:12], as.numeric) # Make the data numeric
+hdata_start <- hdata_start[,-28] # Remove the last column which is superfluous
+
+
+```
+
+
+```{r clean up labelling}
+# Clean up majority protein IDs
+mproteins <- as.vector(mdata_start$Majority.protein.IDs)
+hproteins <- as.vector(hdata_start$Majority.protein.IDs)
+# Create empty vector
+mprotein_id <- vector("list", length(mproteins))
+hprotein_id <- vector("list", length(hproteins))
+
+# For loop to either print the name or separate them if there are several in one line
+for (i in 1:length(mproteins)) {
+  mprotein_id[i] <- strsplit(mproteins[i], ";")
+}
+for (i in 1:length(hproteins)) {
+  hprotein_id[i] <- strsplit(hproteins[i], ";")
+}
+
+# Select only the first element on each line --> this is the main protein for each line then attach it to the first column of the total proteome dataframe
+mprotein_ids <- unlist(lapply(mprotein_id, '[[', 1))
+mdata_start$uniprot <- mprotein_ids
+hprotein_ids <- unlist(lapply(hprotein_id, '[[', 1))
+hdata_start$uniprot <- hprotein_ids
+
+# Do the same for gene names!
+
+# Selecting the main gene name from each line
+mgenes <- vector("list", length(mdata_start$Gene.names)) # Create empty vector
+hgenes <- vector("list", length(hdata_start$Gene.names)) # Create empty vector
+
+for (i in 1:length(mdata_start$Gene.names)) {
+  mgenes[i] <- strsplit(mdata_start$Gene.names[i], ";")
+}
+for (i in 1:length(hdata_start$Gene.names)) {
+  hgenes[i] <- strsplit(hdata_start$Gene.names[i], ";")
+}
+
+mgene_names <- unlist(lapply(mgenes, '[', 1))
+mdata_start$main_gene <- mgene_names
+hgene_names <- unlist(lapply(hgenes, '[', 1))
+hdata_start$main_gene <- hgene_names
+
+```
+
+
+```{r rename raw data columns according to condition and save}
+# Reorganise the data into 32 + 3237 + 37 + 3732
+
+x <- rename(mdata_start, low_1=M1, low_2=M2, low_3=M3, up_1=M4, up_2=M5, up_3=M6, high_1=M7, high_2=M8, high_3=M9, down_1=M10, down_2=M11, down_3=M12) 
+x <- select(x, low_1, low_2, low_3, up_1, up_2, up_3, high_1, high_2, high_3, down_1, down_2, down_3) 
+y <- select(mdata_start, Peptides:main_gene)
+mdata_start <- bind_cols(x,y)
+ 
+x <- rename(hdata_start, low_1=H1, low_2=H2, low_3=H3,up_1=H4, up_2=H5, up_3=H6,high_1=H7, high_2=H8, high_3=H9,down_1=H10, down_2=H11, down_3=H12) %>%
+  select(low_1, low_2, low_3,up_1, up_2, up_3,high_1, high_2, high_3,down_1, down_2, down_3) 
+y <- select(hdata_start, Peptides:main_gene)
+hdata_start <- bind_cols(x,y) 
+
+write.csv(mdata_start,"./Processed data/1mprotdata_start.csv")
+write.csv(hdata_start,"./Processed data/1hprotdata_start.csv")
+
+
+```
+
+```{r Examine data}
+
+# Remove rows which contain NaN within the data columns
+mdata_start <- na.omit(mdata_start)
+hdata_start <- na.omit(hdata_start)
+
+# Extract data only
+all_mdata_raw <- as.data.frame(mdata_start[1:12])
+all_hdata_raw <- as.data.frame(hdata_start[1:12])
+
+#See what raw data looks like 
+
+boxplot(log2(all_mdata_raw), col = rep(c("red", "green", "blue"), each = 12), 
+        main = "All M Raw data",
+        xlab = 'TMT Sample', ylab = 'log2 of Intensity', notch = TRUE)
+
+boxplot(log2(all_hdata_raw), col = rep(c("red", "green", "blue"), each = 12), 
+        main = "All H Raw data",
+        xlab = 'TMT Sample', ylab = 'log2 of Intensity', notch = TRUE)
+
+# can also look at density plots (like a distribution histogram)
+plotDensities(log2(all_mdata_raw), col = rep(c('red', 'green', 'blue'), 6), 
+              main = 'All M Raw data')
+plotDensities(log2(all_hdata_raw), col = rep(c('red', 'green', 'blue'), 6), 
+              main = 'All H Raw data')
+
+# check the column totals (per channel sums)
+format(round(colSums(all_mdata_raw), digits = 0), big.mark = ",")
+format(round(colSums(all_hdata_raw), digits = 0), big.mark = ",")
+
+```
+
+```{r Normisation of data by sample loading correction}
+#Sample loading normalisation
+
+# figure out the global scaling value
+all_mtarget <- mean(c(colSums(all_mdata_raw)))
+all_htarget <- mean(c(colSums(all_hdata_raw)))
+
+
+# do the sample loading normalization before the IRS normalization
+# there is a different correction factor for each column
+norm_mfacs <- all_mtarget / colSums(all_mdata_raw)
+expm_sl <- sweep(all_mdata_raw, 2, norm_mfacs, FUN = "*")
+norm_hfacs <- all_htarget / colSums(all_hdata_raw)
+exph_sl <- sweep(all_hdata_raw, 2, norm_hfacs, FUN = "*")
+
+# make a pre-IRS data frame after sample loading norms
+all_mdata_sl <- cbind(expm_sl)
+all_hdata_sl <- cbind(exph_sl)
+
+# see what the SL normalised data look like
+boxplot(log2(all_mdata_sl), col = rep(c("red", "green", "blue"), each = 12), 
+        main = "All M Sample loading (SL) normalized data",
+        xlab = 'TMT Sample', ylab = 'log2 of Intensity', notch = TRUE)
+boxplot(log2(all_hdata_sl), col = rep(c("red", "green", "blue"), each = 12), 
+        main = "All H Sample loading (SL) normalized data",
+        xlab = 'TMT Sample', ylab = 'log2 of Intensity', notch = TRUE)
+
+# can also look at density plots (like a distribution histogram)    
+plotDensities(log2(all_mdata_sl), col = rep(c("red", "green", "blue"), 12), main = "SL data")
+plotDensities(log2(all_hdata_sl), col = rep(c("red", "green", "blue"), 12), main = "SL data")
+
+# check the columnn totals
+format(round(colSums(all_mdata_sl), digits = 0), big.mark = ",")
+format(round(colSums(all_hdata_sl), digits = 0), big.mark = ",")
+```
+
+
+```{r  Cluster plots}
+# see how things cluster now that we have nice boxplots and density plots
+plotMDS(log2(all_mdata_sl), col = rep(c("red", "green", "blue"), each = 12), 
+        main = "SL/TMM clusters group by M TMT experiment")
+plotMDS(log2(all_hdata_sl), col = rep(c("red", "green", "blue"), each = 12), 
+        main = "SL/TMM clusters group by H TMT experiment")
+
+```
+
+```{r Export normalised data of both genotypes}
+#Add back uniprot ID, protein names, gene names, add phosphosite
+#Calculate fold changes and log2 normalisation, and save the output
+#Apologies that this isn't the prettiest code! I am still learning...
+
+mprotdataSLnorm <-cbind(all_mdata_sl,mdata_start[,13:29])
+hprotdataSLnorm <-cbind(all_hdata_sl,hdata_start[,13:29])
+
+mprotdataSLnorm <- mprotdataSLnorm %>% mutate_at(c("low_1", "low_2","low_3", "up_1","up_2","up_3", "high_1","high_2","high_3","down_1","down_2","down_3"), list(~log2(.), ~log10(.)))
+mprotdataSLnorm <- mprotdataSLnorm[,1:41]
+
+hprotdataSLnorm <- hprotdataSLnorm %>% mutate_at(c("low_1", "low_2","low_3", "up_1","up_2","up_3", "high_1","high_2","high_3","down_1","down_2","down_3"), list(~log2(.), ~log10(.)))
+hprotdataSLnorm <- hprotdataSLnorm[,1:41]
+
+#mouse
+#calculate fold change for each direction
+mprotdataSLnorm$upfc1 <- mprotdataSLnorm$up_1 / mprotdataSLnorm$low_1
+mprotdataSLnorm$upfc2 <- mprotdataSLnorm$up_2 / mprotdataSLnorm$low_2
+mprotdataSLnorm$upfc3 <- mprotdataSLnorm$up_3 / mprotdataSLnorm$low_3
+mprotdataSLnorm$downfc1 <- mprotdataSLnorm$down_1 / mprotdataSLnorm$high_1
+mprotdataSLnorm$downfc2 <- mprotdataSLnorm$down_2 / mprotdataSLnorm$high_2
+mprotdataSLnorm$downfc3 <- mprotdataSLnorm$down_3 / mprotdataSLnorm$high_3
+#calculate log2 of fold changes for statistics upfc vs downfc
+mprotdataSLnorm$upfc1_log2 <- log(mprotdataSLnorm$upfc1,2)
+mprotdataSLnorm$upfc2_log2 <- log(mprotdataSLnorm$upfc2,2)
+mprotdataSLnorm$upfc3_log2 <- log(mprotdataSLnorm$upfc3,2)
+mprotdataSLnorm$downfc1_log2 <- log(mprotdataSLnorm$downfc1,2)
+mprotdataSLnorm$downfc2_log2 <- log(mprotdataSLnorm$downfc2,2)
+mprotdataSLnorm$downfc3_log2 <- log(mprotdataSLnorm$downfc3,2)
+
+#calculate mean of fold changes, and log2 of mean fc for plotting
+mprotdataSLnorm$upfcmean <- (mprotdataSLnorm$upfc1 + mprotdataSLnorm$upfc2 + mprotdataSLnorm$upfc3)/3
+mprotdataSLnorm$downfcmean <- (mprotdataSLnorm$downfc1 + mprotdataSLnorm$downfc2 + mprotdataSLnorm$downfc3)/3
+mprotdataSLnorm$upfcmean_log2 <- log(mprotdataSLnorm$upfcmean, 2)
+mprotdataSLnorm$downfcmean_log2 <- log(mprotdataSLnorm$downfcmean, 2)
+
+#calculate 'direction' a measure of which way sites go - temperature sensitive is direction <0
+mprotdataSLnorm$direction <-mprotdataSLnorm$upfcmean_log2/mprotdataSLnorm$downfcmean_log2
+
+#calculate updown number - a magnitude of change combining both directions. Calculate log2 of these individuals for statistics comparing human v mouse. Including mean, and the log2 of that mean for plotting.
+mprotdataSLnorm$upfcdownfc1 <- mprotdataSLnorm$upfc1 / mprotdataSLnorm$downfc1
+mprotdataSLnorm$upfcdownfc2 <- mprotdataSLnorm$upfc2 / mprotdataSLnorm$downfc2
+mprotdataSLnorm$upfcdownfc3 <- mprotdataSLnorm$upfc3 / mprotdataSLnorm$downfc3
+mprotdataSLnorm$upfcdownfc1_log2 <- log(mprotdataSLnorm$upfcdownfc1, 2)
+mprotdataSLnorm$upfcdownfc2_log2 <- log(mprotdataSLnorm$upfcdownfc2, 2)
+mprotdataSLnorm$upfcdownfc3_log2 <- log(mprotdataSLnorm$upfcdownfc3, 2)
+
+mprotdataSLnorm$upfcdownfcmean <- (mprotdataSLnorm$upfcdownfc1 + mprotdataSLnorm$upfcdownfc2 + mprotdataSLnorm$upfcdownfc3)/3
+mprotdataSLnorm$upfcdownfcmean_log2 <- log(mprotdataSLnorm$upfcdownfcmean, 2)
+
+#calculate fold change for high vs low = hvl
+mprotdataSLnorm$hvlfc1 <- mprotdataSLnorm$high_1 / mprotdataSLnorm$low_1
+mprotdataSLnorm$hvlfc2 <- mprotdataSLnorm$high_2 / mprotdataSLnorm$low_2
+mprotdataSLnorm$hvlfc3 <- mprotdataSLnorm$high_3 / mprotdataSLnorm$low_3
+mprotdataSLnorm$hvlfc1_log2 <- log(mprotdataSLnorm$hvlfc1,2)
+mprotdataSLnorm$hvlfc2_log2 <- log(mprotdataSLnorm$hvlfc2,2)
+mprotdataSLnorm$hvlfc3_log2 <- log(mprotdataSLnorm$hvlfc3,2)
+
+#calculate mean of fold changes, and log2 of mean fc for plotting
+mprotdataSLnorm$hvlfcmean <- (mprotdataSLnorm$hvlfc1 + mprotdataSLnorm$hvlfc2 + mprotdataSLnorm$hvlfc3)/3
+mprotdataSLnorm$hvlfcmean_log2 <- log(mprotdataSLnorm$hvlfcmean, 2)
+
+
+##human
+#calculate fold change for each direction
+hprotdataSLnorm$upfc1 <- hprotdataSLnorm$up_1 / hprotdataSLnorm$low_1
+hprotdataSLnorm$upfc2 <- hprotdataSLnorm$up_2 / hprotdataSLnorm$low_2
+hprotdataSLnorm$upfc3 <- hprotdataSLnorm$up_3 / hprotdataSLnorm$low_3
+hprotdataSLnorm$downfc1 <- hprotdataSLnorm$down_1 / hprotdataSLnorm$high_1
+hprotdataSLnorm$downfc2 <- hprotdataSLnorm$down_2 / hprotdataSLnorm$high_2
+hprotdataSLnorm$downfc3 <- hprotdataSLnorm$down_3 / hprotdataSLnorm$high_3
+#calculate log2 of fold changes for statistics
+hprotdataSLnorm$upfc1_log2 <- log(hprotdataSLnorm$upfc1,2)
+hprotdataSLnorm$upfc2_log2 <- log(hprotdataSLnorm$upfc2,2)
+hprotdataSLnorm$upfc3_log2 <- log(hprotdataSLnorm$upfc3,2)
+hprotdataSLnorm$downfc1_log2 <- log(hprotdataSLnorm$downfc1,2)
+hprotdataSLnorm$downfc2_log2 <- log(hprotdataSLnorm$downfc2,2)
+hprotdataSLnorm$downfc3_log2 <- log(hprotdataSLnorm$downfc3,2)
+
+#calculate mean of fold changes, and log2 of mean fc for plotting
+hprotdataSLnorm$upfcmean <- (hprotdataSLnorm$upfc1 + hprotdataSLnorm$upfc2 + hprotdataSLnorm$upfc3)/3
+hprotdataSLnorm$downfcmean <- (hprotdataSLnorm$downfc1 + hprotdataSLnorm$downfc2 + hprotdataSLnorm$downfc3)/3
+hprotdataSLnorm$upfcmean_log2 <- log(hprotdataSLnorm$upfcmean, 2)
+hprotdataSLnorm$downfcmean_log2 <- log(hprotdataSLnorm$downfcmean, 2)
+
+#calculate 'direction' a measure of which way sites go - temperature sensitive is direction <0
+hprotdataSLnorm$direction <-hprotdataSLnorm$upfcmean_log2/hprotdataSLnorm$downfcmean_log2
+
+#calculate updown number - a magnitude of change combining both directions. Calculate log2 of these individuals for statistics comparing human v mouse. Including mean, and the log2 of that mean for plotting.
+hprotdataSLnorm$upfcdownfc1 <- hprotdataSLnorm$upfc1 / hprotdataSLnorm$downfc1
+hprotdataSLnorm$upfcdownfc2 <- hprotdataSLnorm$upfc2 / hprotdataSLnorm$downfc2
+hprotdataSLnorm$upfcdownfc3 <- hprotdataSLnorm$upfc3 / hprotdataSLnorm$downfc3
+hprotdataSLnorm$upfcdownfc1_log2 <- log(hprotdataSLnorm$upfcdownfc1, 2)
+hprotdataSLnorm$upfcdownfc2_log2 <- log(hprotdataSLnorm$upfcdownfc2, 2)
+hprotdataSLnorm$upfcdownfc3_log2 <- log(hprotdataSLnorm$upfcdownfc3, 2)
+
+hprotdataSLnorm$upfcdownfcmean <- (hprotdataSLnorm$upfcdownfc1 + hprotdataSLnorm$upfcdownfc2 + hprotdataSLnorm$upfcdownfc3)/3
+hprotdataSLnorm$upfcdownfcmean_log2 <- log(hprotdataSLnorm$upfcdownfcmean, 2)
+
+#calculate fold change for high vs low = hvl
+hprotdataSLnorm$hvlfc1 <- hprotdataSLnorm$high_1 / hprotdataSLnorm$low_1
+hprotdataSLnorm$hvlfc2 <- hprotdataSLnorm$high_2 / hprotdataSLnorm$low_2
+hprotdataSLnorm$hvlfc3 <- hprotdataSLnorm$high_3 / hprotdataSLnorm$low_3
+hprotdataSLnorm$hvlfc1_log2 <- log(hprotdataSLnorm$hvlfc1,2)
+hprotdataSLnorm$hvlfc2_log2 <- log(hprotdataSLnorm$hvlfc2,2)
+hprotdataSLnorm$hvlfc3_log2 <- log(hprotdataSLnorm$hvlfc3,2)
+
+#calculate mean of fold changes, and log2 of mean fc for plotting
+hprotdataSLnorm$hvlfcmean <- (hprotdataSLnorm$hvlfc1 + hprotdataSLnorm$hvlfc2 + hprotdataSLnorm$hvlfc3)/3
+hprotdataSLnorm$hvlfcmean_log2 <- log(hprotdataSLnorm$hvlfcmean, 2)
+
+write.csv(mprotdataSLnorm, "./Processed data/1mouse_prot_SLnorm_data.csv", row.names = F)
+write.csv(hprotdataSLnorm, "./Processed data/1human_prot_SLnorm_data.csv", row.names = F)
+```
+
+
+```{r}

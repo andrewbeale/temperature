@@ -1,0 +1,598 @@
+---
+title: "Fold change graphs"
+output: "Graphs showing fold change for proteome and phosphoproteome according to conditions"
+---
+
+```{r}
+#######################################################################################################################################
+# Notebook 2 - DESCRIPTION
+#
+# Here we plot fold changes for shift experiments
+#
+# INPUTS = all normalised data (.csv)
+# OUTPUTS = graphs (.pdf)
+# 
+#######################################################################################################################################
+```
+
+```{r, workspace and packages}
+# Setup
+# Clear your workspace
+rm(list=ls())
+
+# Load useful packages
+if (!require("tidyverse")) {
+  install.packages("tidyverse", dependencies = TRUE)
+  library(tidyverse)
+}
+
+if (!require("dplyr")) {
+  install.packages("dplyr", dependencies = TRUE)
+  library(dplyr)
+}
+
+if (!require("tidyr")) {
+  install.packages("tidyr", dependencies = TRUE)
+  library(tidyr)
+}
+
+if (!require("stringr")) {
+  install.packages("stringr", dependencies = TRUE)
+  library(stringr)
+}
+
+if (!require("magrittr")) {
+  install.packages("magrittr", dependencies = TRUE)
+  library(magrittr)
+}
+
+if (!require("ggplot2")) {
+  install.packages("ggplot2", dependencies = TRUE)
+  library(ggplot2)
+}
+
+if (!require("ggExtra")) {
+  install.packages("ggExtra", dependencies = TRUE)
+  library(ggExtra)
+}
+
+```
+
+```{r, files import}
+#make a list of all the .csv files in your working directory just so you can see what's going on
+X = list.files(".",".csv")
+
+# imac /andrewbeale/Nextcloud22/
+# macbook /andrew/Nextcloud/
+
+#acute
+mphosavs <- read.csv("./Processed data/3mouse_phos_SL(prot)norm_FC.csv")
+hphosavs <- read.csv("./Processed data/3human_phos_SL(prot)norm_FC.csv")
+hprotavs <- read.csv("./Processed data/3human_prot_SL(prot)norm_FC.csv")
+mprotavs <- read.csv("./Processed data/3mouse_prot_SL(prot)norm_FC.csv")
+
+
+```
+
+
+```{r acute graphs}
+#old colours "1" = "#018080", "2" = "#89138A"
+
+
+xyplotting <- function(df, negx, posx, negy, posy){  
+  # Create base plot with gridlines and labels
+  gg <- ggplot(df, aes(x = log2_avg_upfc, y = log2_avg_downfc)) +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "black", linewidth = 0.5) +
+    geom_vline(xintercept = 0, linetype = "dashed", color = "black", linewidth = 0.5) +
+    xlab("log2FCup") + ylab("log2FCdown") +
+    theme_classic(base_size = 7) +
+    theme(legend.position = "none", axis.text = element_text(size = 7)) +
+    #xlim(-1.5, 2.6) + ylim(-1.5, 2.6)
+    xlim(negx, posx) + ylim(negy, posy)
+ 
+   # Plot points for directionfc = 1 first (bottom layer)
+  gg <- gg +
+    geom_point(data = df %>% filter(directionfc == "OTHER"), 
+               aes(color = factor(directionfc)), 
+               shape = 16, alpha = 0.5, size = 0.5)
+
+  # Then plot points for directionfc = 3 (middle layer)
+  gg <- gg +
+    geom_point(data = df %>% filter(directionfc == "PROP"), 
+               aes(color = factor(directionfc)), 
+               shape = 16, alpha = 0.5, size = 0.5)
+
+  # Finally, plot points for directionfc = 2 (top layer)
+  gg <- gg +
+    geom_point(data = df %>% filter(directionfc == "INV"), 
+               aes(color = factor(directionfc)), 
+               shape = 16, alpha = 0.5, size = 0.5)
+
+  # Custom color scale
+  gg <- gg + scale_color_manual(values = c("PROP" = "#ff0000", "INV" = "#3cb9fa", "OTHER" = "grey"))
+
+  #gg <- gg %>% ggMarginal(type = "violin", size = 10, fill = species, colour = "black", linewidth = 0.3)
+  
+return(list(ggplot = gg, df_data = df))
+}
+
+
+mphosshift <- xyplotting(mphosavs, -1, 2, -1, 1.1)
+hphosshift <- xyplotting(hphosavs, -1, 2, -1, 1.1)
+mprotshift <- xyplotting(mprotavs, -1.5, 2.6, -1.5, 2.1)
+hprotshift <- xyplotting(hprotavs, -1.5, 2.6, -1.5, 2.1)
+
+gridExtra::grid.arrange(mphosshift$ggplot, hphosshift$ggplot, mprotshift$ggplot, hprotshift$ggplot)
+
+ggsave(plot=mphosshift$ggplot, "./Plots/mphosshift.pdf", width = 1.5, height = 1.5, dpi = 300)
+ggsave(plot=hphosshift$ggplot, "./Plots/hphosshift.pdf", width = 1.5, height = 1.5, dpi = 300)
+ggsave(plot=mprotshift$ggplot, "./Plots/mprotshift.pdf", width = 1.5, height = 1.5, dpi = 300)
+ggsave(plot=hprotshift$ggplot, "./Plots/hprotshift.pdf", width = 1.5, height = 1.5, dpi = 300)
+
+
+```
+
+```{r acute statistics MANOVA}
+#MANOVA test
+# Step 1: Add a species column to each dataframe
+mprotavs$species <- "mouse"
+hprotavs$species <- "human"
+mphosavs$species <- "mouse"
+hphosavs$species <- "human"
+
+# Step 2: Combine the two dataframes
+dfprot_combined <- rbind(mprotavs, hprotavs)
+dfphos_combined <- rbind(mphosavs, hphosavs)
+
+# Step 3: Perform MANOVA
+# Use log2_avg_upfc as the X variable and log2_avg_downfc as the Y variable
+manovaprot_result <- manova(cbind(log2_avg_upfc, log2_avg_downfc) ~ species, data = dfprot_combined)
+manovaphos_result <- manova(cbind(log2_avg_upfc, log2_avg_downfc) ~ species, data = dfphos_combined)
+
+# Step 4: Check summary statistics for the MANOVA test
+summary(manovaprot_result)
+summary(manovaphos_result)
+
+
+```
+
+```{r acute centroids}
+
+# Function to calculate centroid
+calculate_centroid <- function(df) {
+  x_centroid <- mean(df$log2_avg_upfc, na.rm = TRUE)
+  y_centroid <- mean(df$log2_avg_downfc, na.rm = TRUE)
+  return(c(x_centroid, y_centroid))
+}
+
+calculate_centroid(mprotavs)
+calculate_centroid(hprotavs)
+
+# Updated xyplotting function
+xyplotting <- function(df, negx, posx, negy, posy){
+  
+  # Calculate centroid
+  centroid <- calculate_centroid(df)
+
+  # Create base plot with gridlines and labels
+  gg <- ggplot(df, aes(x = log2_avg_upfc, y = log2_avg_downfc)) +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "black", linewidth = 0.5) +
+    geom_vline(xintercept = 0, linetype = "dashed", color = "black", linewidth = 0.5) +
+    xlab("log2FCup") + ylab("log2FCdown") +
+    theme_classic(base_size = 7) +
+    theme(legend.position = "none", axis.text = element_text(size = 7)) +
+    xlim(negx, posx) + ylim(negy, posy)
+  
+  # Plot points for directionfc = 1 first (bottom layer)
+  gg <- gg +
+    geom_point(data = df %>% filter(directionfc == "OTHER"), 
+               aes(color = factor(directionfc)), 
+               shape = 16, alpha = 0.5, size = 0.5)
+  
+  # Then plot points for directionfc = 3 (middle layer)
+  gg <- gg +
+    geom_point(data = df %>% filter(directionfc == "PROP"), 
+               aes(color = factor(directionfc)), 
+               shape = 16, alpha = 0.5, size = 0.5)
+  
+  # Finally, plot points for directionfc = 2 (top layer)
+  gg <- gg +
+    geom_point(data = df %>% filter(directionfc == "INV"), 
+               aes(color = factor(directionfc)), 
+               shape = 16, alpha = 0.5, size = 0.5)
+  
+  # Custom color scale
+  gg <- gg + scale_color_manual(values = c("PROP" = "#ff0000", "INV" = "#3cb9fa", "OTHER" = "grey"))
+  
+  # Add centroid to the plot
+  gg <- gg + geom_point(aes(x = centroid[1], y = centroid[2]), color = "black", size = 3/.pt, shape = 19)
+  
+  # Add covariance ellipse using stat_ellipse if you want
+  # gg <- gg + stat_ellipse(level = 0.95, color = "black", linetype = "dashed", 
+                       #   geom = "polygon", fill = "#bbbbbb50")
+  
+  return(list(ggplot = gg, df_data = df))
+}
+
+# Example usage with your datasets
+mphosshift <- xyplotting(mphosavs, -1, 2, -1, 1.1)
+hphosshift <- xyplotting(hphosavs, -1, 2, -1, 1.1)
+
+# To plot the results:
+mphosshift$ggplot
+hphosshift$ggplot
+
+ggsave(plot=mphosshift$ggplot, "./Plots/mphosshift2.pdf", width = 1.5, height = 1.5, dpi = 300)
+ggsave(plot=hphosshift$ggplot, "./Plots/hphosshift2.pdf", width = 1.5, height = 1.5, dpi = 300)
+
+```
+
+```{r acute phos vs prot mouse vectors}
+
+# Convert the mouse and human coordinates to vectors (Euclidean distance)
+mouseprot_magnitude <- sqrt(rowSums(mprotavs[, c("log2_avg_upfc", "log2_avg_downfc")]^2))
+mousephos_magnitude <- sqrt(rowSums(mphosavs[, c("log2_avg_upfc", "log2_avg_downfc")]^2))
+
+# Compare the magnitudes using a Wilcoxon test
+magnitude_test <- wilcox.test(mouseprot_magnitude, mousephos_magnitude)
+
+# View the test result
+print(magnitude_test)
+
+# Create a dataframe for plotting
+magnitude_df <- data.frame(
+  species = c(rep("Mouse\n proteome", length(mouseprot_magnitude)), rep("Mouse\n phosphoproteome", length(mousephos_magnitude))),
+  magnitude = c(mouseprot_magnitude, mousephos_magnitude)
+)
+
+vectorannotation_text <- paste(
+    "Wilcoxon p-value:", signif(magnitude_test$p.value, 3), 
+    "\nMedian Proteome", ":", round(median(mouseprot_magnitude), 3),
+    "\nMedian Phosphoproteome", ":", round(median(mousephos_magnitude), 3)
+  )
+
+# Plot the magnitudes
+mousevectors <- ggplot(magnitude_df, aes(x = species, y = magnitude)) +
+  geom_boxplot(alpha = 0.7) +
+  labs(y = "Vector Magnitude", x = "") +
+  theme_classic() +
+  theme(axis.text = element_text(size = 7), axis.title = element_text(size = 7)) +
+  annotate("text", x = 1, y = Inf, label = vectorannotation_text, vjust = 1.5, hjust = 0.5, size = 7/.pt)
+
+ggsave(plot=mousevectors, "./Plots/mprot_v_mphos_fcvectors.pdf", width = 1.5, height = 1.5, dpi = 300)
+
+```
+
+
+```{r acute phos vs prot human vectors}
+
+# Convert the human and human coordinates to vectors (Euclidean distance)
+humanprot_magnitude <- sqrt(rowSums(hprotavs[, c("log2_avg_upfc", "log2_avg_downfc")]^2))
+humanphos_magnitude <- sqrt(rowSums(hphosavs[, c("log2_avg_upfc", "log2_avg_downfc")]^2))
+
+# Compare the magnitudes using a Wilcoxon test
+magnitude_test <- wilcox.test(humanprot_magnitude, humanphos_magnitude)
+
+# View the test result
+print(magnitude_test)
+
+# Create a dataframe for plotting
+magnitude_df <- data.frame(
+  species = c(rep("Human\n proteome", length(humanprot_magnitude)), rep("Human\n phosphoproteome", length(humanphos_magnitude))),
+  magnitude = c(humanprot_magnitude, humanphos_magnitude)
+)
+
+vectorannotation_text <- paste(
+    "Wilcoxon p-value:", signif(magnitude_test$p.value, 3), 
+    "\nMedian Proteome", ":", round(median(humanprot_magnitude), 3),
+    "\nMedian Phosphoproteome", ":", round(median(humanphos_magnitude), 3)
+  )
+
+# Plot the magnitudes
+humanvectors <- ggplot(magnitude_df, aes(x = species, y = magnitude)) +
+  geom_boxplot(alpha = 0.7) +
+  labs(y = "Vector Magnitude", x = "") +
+  theme_classic() +
+  theme(axis.text = element_text(size = 7), axis.title = element_text(size = 7)) +
+  annotate("text", x = 1, y = Inf, label = vectorannotation_text, vjust = 1.5, hjust = 0.5, size = 7/.pt)
+
+ggsave(plot=humanvectors, "./Plots/hprot_v_hphos_fcvectors.pdf", width = 1.5, height = 1.5, dpi = 300)
+
+```
+
+
+
+```{r adaptation}
+
+hphoshvl <- read.csv("./Processed data/3human_phos_SL(prot)norm_hvl.csv")
+mphoshvl <- read.csv("./Processed data/3mouse_phos_SL(prot)norm_hvl.csv")
+hprothvl <- read.csv("./Processed data/3human_prot_SL(prot)norm_hvl.csv")
+mprothvl <- read.csv("./Processed data/3mouse_prot_SL(prot)norm_hvl.csv")
+
+
+# Function to calculate fold changes and plot density
+# Function to calculate fold changes, perform Wilcoxon test, and plot densities
+compare_fold_changes <- function(df1, low_prefix1, high_prefix1, species1,
+                                 df2, low_prefix2, high_prefix2, species2) {
+  
+  # Calculate fold changes for the first dataframe
+  df1 <- df1 %>%
+    mutate(species = species1)
+  
+  # Calculate fold changes for the second dataframe
+  df2 <- df2 %>%
+    mutate(species = species2)
+  
+  # Combine the two dataframes
+  combined_df <- bind_rows(df1, df2)
+  
+  # Perform Wilcoxon test on average fold change between the two species
+  wilcox_result <- wilcox.test(log2_avg_high_low ~ species, data = combined_df)
+  p_value <- signif(wilcox_result$p.value, 3)
+  
+  # Calculate medians for each species
+  medians <- combined_df %>%
+    group_by(species) %>%
+    summarise(median_fold_change = median(log2_avg_high_low, na.rm = TRUE))
+  
+  # Create the density plot
+  gg <- ggplot(combined_df, aes(x = log2_avg_high_low, fill = species)) +
+    geom_density(alpha = 0.5, colour = "black") +
+    geom_vline(xintercept = 0, linetype = "dashed", color = "black", linewidth = 0.5) +
+    theme_classic(base_size = 7) +
+    labs(x = "Log2 FC", y = "Density") +
+    xlim(-1.5, 1.5) + 
+    scale_fill_manual(values = c("#ff8000", "#333333")) +
+    theme(legend.position = "none", axis.text = element_text(size = 7), axis.ticks.length=unit(.05, "in"))
+  
+  # Add p-value and medians as annotation on the plot
+  annotation_text <- paste(
+    "Wilcoxon p-value:", p_value, 
+    "\nMedian", species1, ":", round(medians$median_fold_change[medians$species == species1], 3),
+    "\nMedian", species2, ":", round(medians$median_fold_change[medians$species == species2], 3)
+  )
+  
+  gg <- gg + annotate("text", x = 1, y = Inf, label = annotation_text, vjust = 1.5, hjust = 0.5, size = 7/.pt)
+  
+  return(list(ggplot = gg, df_data = combined_df))
+}
+
+
+comparephoshvl <- compare_fold_changes(hphoshvl, "Hlow", "Hhigh", "Human", 
+                     mphoshvl, "Mlow", "Mhigh", "Mouse")
+ggsave(plot=comparephoshvl$ggplot, "./Plots/comparephoshvl.pdf", width = 1.5, height = 1, dpi = 300)
+
+
+compareprothvl <- compare_fold_changes(hprothvl, "Hlow", "Hhigh", "Human", 
+                     mprothvl, "Mlow", "Mhigh", "Mouse")
+ggsave(plot=compareprothvl$ggplot, "./Plots/compareprothvl.pdf", width = 1.5, height = 1, dpi = 300)
+
+
+
+#to only compare p<0.05
+hphoshvlp <- hphoshvl %>%
+  filter(pVal < 0.05)
+mphoshvlp <- mphoshvl %>%
+  filter(P.value < 0.05)
+
+
+comparephoshvlp0.05 <- compare_fold_changes(hphoshvlp, "Hlow", "Hhigh", "Human", 
+                     mphoshvlp, "Mlow", "Mhigh", "Mouse")
+comparephosavlp0.05
+
+
+
+```
+
+
+```{r pathway highlighting heat}
+
+library(tidyverse)
+library(ggrepel)
+
+path <- read.csv("pathway_genes.csv")
+
+hprotavs_path <- hprotavs %>%
+  inner_join((path %>% filter(category == "heat") %>% 
+                mutate(main_gene = toupper(main_gene))), 
+     by = "main_gene")
+
+mprotavs_path <- mprotavs %>%
+  inner_join((path %>% filter(category == "heat") %>% 
+                mutate(main_gene = str_to_title(main_gene))), 
+     by = "main_gene")
+
+
+xynamesplotting <- function(df, negx, posx, negy, posy){  
+  # Create base plot with gridlines and labels
+  gg <- ggplot(df, aes(x = log2_avg_upfc, y = log2_avg_downfc, label = main_gene)) +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "black", linewidth = 0.5) +
+    geom_vline(xintercept = 0, linetype = "dashed", color = "black", linewidth = 0.5) +
+    xlab("log2FCup") + ylab("log2FCdown") +
+    theme_classic(base_size = 7) +
+    theme(legend.position = "none", axis.text = element_text(size = 7)) +
+    #xlim(-1.5, 2.6) + ylim(-1.5, 2.6)
+    xlim(negx, posx) + ylim(negy, posy)
+ 
+  gg <- gg +
+    geom_point(size = 0.5) + 
+    geom_text_repel(size = 2, segment.size = 0.5/.pt, max.overlaps=100, point.padding = 0.5/.pt, force = 2, min.segment.length = 0)
+
+return(list(ggplot = gg, df_data = df))
+}
+
+# Example usage with your datasets
+mprotshift_path <- xynamesplotting(mprotavs_path, -0.2, 0.6, -0.2, 0.5)
+hprotshift_path <- xynamesplotting(hprotavs_path, -0.2, 0.6, -0.2, 0.5)
+
+# To plot the results:
+mprotshift_path$ggplot
+hprotshift_path$ggplot
+
+ggsave(plot=mprotshift_path$ggplot, "./Plots/mprotshift_heatpath.pdf", width = 1.5, height = 1.5, dpi = 300)
+ggsave(plot=hprotshift_path$ggplot, "./Plots/hprotshift_heatpath.pdf", width = 1.5, height = 1.5, dpi = 300)
+
+
+mprothvlavs_path <- mprothvlavs %>%
+  inner_join((path %>% filter(category == "heat") %>% 
+                mutate(main_gene = str_to_title(main_gene))), 
+     by = "main_gene")
+
+hprothvlavs_path <- hprothvlavs %>%
+  inner_join((path %>% filter(category == "heat") %>% 
+                mutate(main_gene = toupper(main_gene))), 
+     by = "main_gene")
+
+hvlnamesplotting <- function(df){  
+  # Create base plot with gridlines and labels
+  gg <- ggplot(df, aes(x = main_gene, y = fold_change)) +
+    geom_boxplot() +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "black", linewidth = 0.5) +
+    xlab("") + ylab("log2FC") +
+    theme_classic(base_size = 7) +
+    ylim(-2.7,1) +
+    theme(legend.position = "none", axis.text.x = element_text(angle = 90, size = 7))
+
+return(list(ggplot = gg, df_data = df))
+}
+
+mprothvlavs_pathlong <- mprothvlavs_path %>%
+  select(main_gene, 14:16) %>%
+  pivot_longer(cols = 2:4, names_to = "replicate", values_to = "fold_change")
+
+hprothvlavs_pathlong <- hprothvlavs_path %>%
+  select(main_gene, 14:16) %>%
+  pivot_longer(cols = 2:4, names_to = "replicate", values_to = "fold_change")
+
+mprothvl_path <- hvlnamesplotting(mprothvlavs_pathlong)
+hprothvl_path <- hvlnamesplotting(hprothvlavs_pathlong)
+
+# To plot the results:
+mprothvl_path$ggplot
+hprothvl_path$ggplot
+
+ggsave(plot=mprothvl_path$ggplot, "./Plots/mprothvl_heatpath.pdf", width = 1.5, height = 1.5, dpi = 300)
+ggsave(plot=hprothvl_path$ggplot, "./Plots/hprothvl_heatpath.pdf", width = 1.5, height = 1.5, dpi = 300)
+
+hprothvlavs_path <- hprotavs %>%
+  inner_join((path %>% filter(category == "heat") %>% 
+                mutate(main_gene = toupper(main_gene))), 
+     by = "main_gene")
+
+mprotavs_path <- mprotavs %>%
+  inner_join((path %>% filter(category == "heat") %>% 
+                mutate(main_gene = str_to_title(main_gene))), 
+     by = "main_gene")
+
+
+```
+
+```{r pathway tor wnk}
+path2 <- path %>% filter(category != "heat") %>% filter(category != "translation")
+
+
+hphosavs_path <- hphosavs %>%
+  inner_join((path %>% filter(category != "heat") %>% filter(category != "translation") %>% 
+               select(main_gene, category)) %>%
+                mutate(main_gene = toupper(main_gene)), 
+     by = "main_gene") %>%
+  distinct(phosphosite, .keep_all = T)
+
+mphosavs_path <- mphosavs %>%
+  inner_join((path %>% filter(category != "heat") %>% filter(category != "translation") %>% 
+               select(main_gene, category)) %>%
+                mutate(main_gene = str_to_title(main_gene)), 
+     by = "main_gene") %>%
+  distinct(phosphosite, .keep_all = T)
+
+xysitesplotting <- function(df, negx, posx, negy, posy){  
+  # Create base plot with gridlines and labels
+  gg <- ggplot(df, aes(x = log2_avg_upfc, y = log2_avg_downfc, label = phosphosite)) +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "black", linewidth = 0.5) +
+    geom_vline(xintercept = 0, linetype = "dashed", color = "black", linewidth = 0.5) +
+    xlab("log2FCup") + ylab("log2FCdown") +
+    theme_classic(base_size = 7) +
+    theme(legend.position = "none", axis.text = element_text(size = 7)) +
+    #xlim(-1.5, 2.6) + ylim(-1.5, 2.6)
+    xlim(negx, posx) + ylim(negy, posy)
+ 
+  gg <- gg +
+    geom_point(size = 0.5) + 
+    geom_text_repel(size = 2, segment.size = 0.5/.pt, max.overlaps=100, point.padding = 0.5/.pt, force = 2, min.segment.length = 0)
+
+return(list(ggplot = gg, df_data = df))
+}
+
+# Example usage with your datasets
+mphosavs_path_graph <- xysitesplotting(mphosavs_path, -1, 2, -1, 2)
+hphosavs_path_graph <- xysitesplotting(hphosavs_path, -1, 2, -1, 2)
+
+# To plot the results:
+mphosavs_path_graph$ggplot
+hphosavs_path_graph$ggplot
+
+ggsave(plot=mprotshift_path$ggplot, "./Plots/mphosshift_torwaterpath.pdf", width = 1.5, height = 1.5, dpi = 300)
+ggsave(plot=hprotshift_path$ggplot, "./Plots/hphosshift_torwaterpath.pdf", width = 1.5, height = 1.5, dpi = 300)
+
+
+hphoshvl_path <- hphoshvl %>%
+  inner_join((path %>% filter(category != "heat") %>% filter(category != "translation") %>% 
+               select(main_gene, category)) %>%
+                mutate(main_gene = toupper(main_gene)), 
+     by = "main_gene") %>%
+  distinct(phosphosite, .keep_all = T)
+
+mphoshvl_path <- mphoshvl %>%
+  inner_join((path %>% filter(category != "heat") %>% filter(category != "translation") %>% 
+               select(main_gene, category)) %>%
+                mutate(main_gene = str_to_title(main_gene)), 
+     by = "main_gene") %>%
+  distinct(phosphosite, .keep_all = T)
+
+write.csv(hphoshvl_path, "hphoshvl_path.csv")
+write.csv(mphoshvl_path, "mphoshvl_path.csv")
+hvlnamesplotting <- function(df){  
+  # Create base plot with gridlines and labels
+  gg <- ggplot(df, aes(x = main_gene, y = fold_change)) +
+    geom_boxplot() +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "black", linewidth = 0.5) +
+    xlab("") + ylab("log2FC") +
+    theme_classic(base_size = 7) +
+    ylim(-2.7,1) +
+    theme(legend.position = "none", axis.text.x = element_text(angle = 90, size = 7))
+
+return(list(ggplot = gg, df_data = df))
+}
+
+mprothvlavs_pathlong <- mprothvlavs_path %>%
+  select(main_gene, 14:16) %>%
+  pivot_longer(cols = 2:4, names_to = "replicate", values_to = "fold_change")
+
+hprothvlavs_pathlong <- hprothvlavs_path %>%
+  select(main_gene, 14:16) %>%
+  pivot_longer(cols = 2:4, names_to = "replicate", values_to = "fold_change")
+
+mprothvl_path <- hvlnamesplotting(mprothvlavs_pathlong)
+hprothvl_path <- hvlnamesplotting(hprothvlavs_pathlong)
+
+# To plot the results:
+mprothvl_path$ggplot
+hprothvl_path$ggplot
+
+ggsave(plot=mprothvl_path$ggplot, "./Plots/mprothvl_heatpath.pdf", width = 1.5, height = 1.5, dpi = 300)
+ggsave(plot=hprothvl_path$ggplot, "./Plots/hprothvl_heatpath.pdf", width = 1.5, height = 1.5, dpi = 300)
+
+hprothvlavs_path <- hprotavs %>%
+  inner_join((path %>% filter(category == "heat") %>% 
+                mutate(main_gene = toupper(main_gene))), 
+     by = "main_gene")
+
+mprotavs_path <- mprotavs %>%
+  inner_join((path %>% filter(category == "heat") %>% 
+                mutate(main_gene = str_to_title(main_gene))), 
+     by = "main_gene")
+
+
+```
+
+

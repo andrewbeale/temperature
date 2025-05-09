@@ -1,0 +1,671 @@
+---
+title: "motif analysis"
+output: "motif-x tables and sequence logos"
+date: '2022-11-04'
+---
+
+
+``` {r notes on usage}
+#
+# Notebook 3 - DESCRIPTION
+#
+# Here we analyse the phosphoproteome for amino acid motifs
+# Motifs are looked for in subsections of the data - sites which change in abundance in a particular direction, changing proportionally (prop) to or inversly proportionally (invprop) to temperature.
+# Motif-x is used for initial analysis, but enrichment-depletion sequence logos are used in the paper
+#
+#Logos should be exported as as 5x3 inch, landscape, by viewing in console.
+#
+```
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+require('rmotifx')
+require('dplyr')
+require('tidyr')
+install.packages('devtools')
+require(devtools)
+install_github('omarwagih/rmotifx')
+
+require('ggplot2') 
+# require('seqlogo')
+# require('ggseqlogo')
+
+require('dagLogo')
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+BiocManager::install("dagLogo")
+
+require('dplyr')
+
+writeFasta<-function(data, filename){
+  fastaLines = c()
+  for (rowNum in 1:nrow(data)){
+    fastaLines = c(fastaLines, as.character(paste(">", data[rowNum,"bg.names"], sep = "")))
+    fastaLines = c(fastaLines,as.character(data[rowNum,"bg.seqs"]))
+  }
+  fileConn<-file(filename)
+  writeLines(fastaLines, fileConn)
+  close(fileConn)
+}
+
+```
+
+
+```{r import}
+# Clear your workspace
+rm(list=ls())
+
+hphos <- read.csv("./Processed data/2human_phos_SL(prot)norm_FC.csv")
+mphos <- read.csv("./Processed data/2mouse_phos_SL(prot)norm_FC.csv")
+hprot <- read.csv("./Processed data/2human_prot_SL(prot)norm_FC.csv")
+mprot <- read.csv("./Processed data/2mouse_prot_SL(prot)norm_FC.csv")
+
+mphos_updownFCs2 <- read.csv("./Processed data/mouse_phos_SL(prot)norm_FC.csv") %>%
+  select(id, Sequence.window)
+mphos <- left_join(mphos, mphos_updownFCs2, by= "id")
+
+hphos_updownFCs2 <- read.csv("./Processed data/human_phos_SL(prot)norm_FC.csv") %>%
+  select(id, Sequence.window)
+hphos <- left_join(hphos, hphos_updownFCs2, by= "id")
+
+hphoshvl <- read.csv("./Processed data/2human_phos_SL(prot)norm_hvl.csv")
+mphoshvl <- read.csv("./Processed data/2mouse_phos_SL(prot)norm_hvl.csv")
+hprothvl <- read.csv("./Processed data/2human_prot_SLnorm_hvl.csv")
+mprothvl <- read.csv("./Processed data/2mouse_prot_SLnorm_hvl.csv")
+
+mphos_updownFCs2hvl <- read.csv("./Processed data/mouse_phos_SL(prot)norm_hvl.csv") %>%
+  select(id, Sequence.window)
+mphoshvl <- left_join(mphoshvl, mphos_updownFCs2hvl, by= "id")
+
+hphos_updownFCs2hvl <- read.csv("./Processed data/human_phos_SL(prot)norm_hvl.csv") %>%
+  select(id, Sequence.window)
+hphoshvl <- left_join(hphoshvl, hphos_updownFCs2hvl, by= "id")
+
+```
+
+
+
+```{r, fc calcs and categorisation of direction}
+
+####code for acute.
+
+fc_av_calc <- function(df) { df <- df %>%
+  mutate(across(starts_with("up_low_log2"), ~ 2^(.))) %>%
+  mutate(across(starts_with("down_high_log2"), ~ 2^(.)))
+
+# Step 2: Compute the averages of the first 3 and last 3 columns
+df <- df %>%
+  rowwise() %>%
+  mutate(avg_upfc = mean(c_across(starts_with("up_low_log2"))),
+         avg_downfc = mean(c_across(starts_with("down_high_log2"))))
+
+# Step 3: Log2-transform the averaged values
+df <- df %>%
+  mutate(log2_avg_upfc = log2(avg_upfc),
+         log2_avg_downfc = log2(avg_downfc))
+}
+
+mphosavs <- fc_av_calc(mphos)
+hphosavs <- fc_av_calc(hphos)
+mprotavs <- fc_av_calc(mprot)
+hprotavs <- fc_av_calc(hprot)
+
+
+#old colours "1" = "#018080", "2" = "#89138A"
+
+fc_av_category <- function(df){
+  
+  df <- df %>% 
+    mutate(directionfc = case_when(
+      log2_avg_upfc > 0 & log2_avg_downfc < 0 & qVal < 0.05 ~ 1, #prop
+      log2_avg_upfc < 0 & log2_avg_downfc > 0 & qVal < 0.05 ~ 2, #inv
+      #qVal > 0.05 | log2_avg_upfc > 0 & log2_avg_downfc < 0 & qVal < 0.05 ~ 3,
+      -(log2_avg_upfc > 0 & log2_avg_downfc < 0 & qVal < 0.05) | !(log2_avg_upfc < 0 &log2_avg_downfc > 0 &       qVal < 0.05)  ~ 3,
+    TRUE ~ NA_real_  # Handle any remaining cases, assigning NA
+  )) }
+
+mphosavs <- fc_av_category(mphosavs)
+hphosavs <- fc_av_category(hphosavs)
+mprotavs <- fc_av_category(mprotavs)
+hprotavs <- fc_av_category(hprotavs)
+
+
+####code for adapt
+
+hvl_av_calc <- function(df1, low_prefix1, high_prefix1, species1) {
+  
+  # Calculate fold changes for the first dataframe
+  df1 <- df1 %>%
+    mutate(
+      fold_change_1 = !!sym(paste0(high_prefix1, "_1")) - !!sym(paste0(low_prefix1, "_1")),
+      fold_change_2 = !!sym(paste0(high_prefix1, "_2")) - !!sym(paste0(low_prefix1, "_2")),
+      fold_change_3 = !!sym(paste0(high_prefix1, "_3")) - !!sym(paste0(low_prefix1, "_3")),
+      avg_fold_change = (fold_change_1 + fold_change_2 + fold_change_3) / 3,
+    )
+}
+
+hphoshvl2 <- hvl_av_calc(hphoshvl, "Hlow", "Hhigh") 
+mphoshvl2 <- hvl_av_calc(mphoshvl, "Mlow", "Mhigh")
+hprothvl2 <- hvl_av_calc(hprothvl, "Hlow", "Hhigh") 
+mprothvl2 <- hvl_av_calc(mprothvl, "Mlow", "Mhigh")
+
+hvl_av_category <- function(df){
+  
+  df <- df %>% 
+    mutate(directionfc = case_when(
+      avg_fold_change > 0 & pVal < 0.05 ~ 1,
+      avg_fold_change < 0 & pVal < 0.05 ~ 2,
+      #qVal > 0.05 | log2_avg_upfc > 0 & log2_avg_downfc < 0 & qVal < 0.05 ~ 3,
+      pVal > 0.05  ~ 3,
+    TRUE ~ NA_real_  # Handle any remaining cases, assigning NA
+  )) }
+
+mphoshvlavs <- hvl_av_category(mphoshvl2)
+hphoshvlavs <- hvl_av_category(hphoshvl2)
+mprothvlavs <- hvl_av_category(mprothvl2)
+hprothvlavs <- hvl_av_category(hprothvl2)
+
+###write some code to export these subsets
+write.csv(mphosavs, "./Plots/For other analyses/mphosavs.csv")
+write.csv(hphosavs, "./Plots/For other analyses/hphosavs.csv")
+write.csv(mprotavs, "./Plots/For other analyses/mprotavs.csv")
+write.csv(hprotavs, "./Plots/For other analyses/hprotavs.csv")
+
+write.csv(mphoshvlavs, "./Plots/For other analyses/mphoshvlavs.csv")
+write.csv(hphoshvlavs, "./Plots/For other analyses/hphoshvlavs.csv")
+write.csv(mprothvlavs, "./Plots/For other analyses/mprothvlavs.csv")
+write.csv(hprothvlavs, "./Plots/For other analyses/hprothvlavs.csv")
+
+```
+
+```{r subsetting}
+
+###NB identifying background is important as is which sites to include in your foreground. background_hphosunnorm is every site detected which change in any direction. When you use this background, significant hits in human falls vs when the background is set as the sites in the three other 'directionality' quadrants i.e. all sites - your foreground. You can recover signficance to see broadly the similar logos if the pval cutoff for the dagLogo is set at 0.1. Currently, the script is set for the remaining three quadrants as the background, with pval 0.05. 
+
+#setting up foreground and background
+significant_hphosunnorm_prop <-
+  hphosavs %>%
+  subset(directionfc == 1)
+significant_hphosunnorm_invprop <-
+  hphosavs %>%
+  subset(directionfc == 2)
+background_hphosunnorm_bgprop <-
+  hphosavs %>%
+  subset(directionfc == 1 | directionfc == 3)
+background_hphosunnorm_bginv <-
+  hphosavs %>%
+  subset(directionfc == 1 | directionfc == 3)
+background_hphosunnorm <-
+  hphosavs
+
+significant_mphosunnorm_prop <-
+  mphosavs %>%
+  subset(directionfc == 1)
+significant_mphosunnorm_invprop <-
+  mphosavs %>%
+  subset(directionfc == 2)
+background_mphosunnorm_bgprop <-
+  mphosavs %>%
+  subset(directionfc == 1 | directionfc == 3)
+background_mphosunnorm_bginv <-
+  mphosavs %>%
+  subset(directionfc == 1 | directionfc == 3)
+background_mphosunnorm <-
+  mphosavs
+
+###adapt
+#human
+significant_hphosunnorm_hvlwarm <-
+  hphoshvlavs %>%
+  subset(directionfc == 1)
+significant_hphosunnorm_hvlcool <-
+  hphoshvlavs %>%
+  subset(directionfc == 2)
+background_hphosunnorm_bghvlwarm <-
+  hphoshvlavs %>%
+  subset(directionfc == 1 | directionfc == 3)
+background_hphosunnorm_bghvlcool <-
+  hphoshvlavs %>%
+  subset(directionfc == 1 | directionfc == 3)
+background_hphosunnorm <-
+  hphoshvlavs
+
+significant_mphosunnorm_hvlwarm <-
+  mphoshvlavs %>%
+  subset(directionfc == 1)
+significant_mphosunnorm_hvlcool <-
+  mphoshvlavs %>%
+  subset(directionfc == 2)
+background_mphosunnorm_bghvlwarm <-
+  mphoshvlavs %>%
+  subset(directionfc == 1 | directionfc == 3)
+background_mphosunnorm_bghvlcool <-
+  mphoshvlavs %>%
+  subset(directionfc == 1 | directionfc == 3)
+background_mphosunnorm <-
+  mphoshvlavs
+
+
+
+```
+
+
+```{r human prop}
+
+# Read in sequences
+# fg.seqs = as.character(significant_hphosunnorm_prop$Sequence.window)
+# fg.seqs = substr(fg.seqs, 6, 26) #1, 31
+# fg.seqs <- gsub("_", "X", fg.seqs)
+# bg.seqs = as.character(background_hphosunnorm_bgprop$Sequence.window)
+# bg.seqs = substring(bg.seqs,6, 26)
+# bg.seqs <- gsub("_", "X", bg.seqs)
+# bg.names = as.character(background_hphosunnorm_bgprop$Leading.proteins)
+
+x <- hphosavs %>%
+  filter (directionfc ==1)
+xplus <- hphosavs %>%
+  filter (!directionfc ==1)
+
+fg.seqs = as.character(x$Sequence.window)
+fg.seqs <- substr(fg.seqs, 6, 26)
+bg.seqs = as.character(xplus$Sequence.window)
+bg.seqs <- substr(bg.seqs, 6, 26)
+
+bg.seqs <- gsub("_", "X", bg.seqs)
+bg.names = as.character(xplus$uniprot)
+
+X <- data.frame(bg.names, bg.seqs)
+writeFasta(X, "example.fasta")
+
+mot = motifx(fg.seqs, bg.seqs, central.res = 'STY', min.seqs = 20, pval.cutoff = 5e-2)
+print(mot)
+# count(phase1524[str_detect(phase1524$Sequence.window, "...........[KR][KR]..[STY]..............."), ])
+
+##Sequence logo
+
+dat <- unlist(fg.seqs)
+
+##prepare proteome from a fasta file
+proteome <- prepareProteome(fasta = "example.fasta", 
+                            species = "Mus musculus")
+
+##prepare an object of dagPeptides
+seq <- formatSequence(seq = dat, proteome = proteome, upstreamOffset = 15,
+                      downstreamOffset = 15)
+
+bg_fisher <- buildBackgroundModel(seq, background = "wholeProteome", 
+                                  proteome = proteome, testType = "fisher")
+bg_ztest <- buildBackgroundModel(seq, background = "wholeProteome", 
+                                 proteome = proteome, testType = "ztest")
+
+t0 <- testDAU(dagPeptides = seq, dagBackground = bg_fisher)
+dagLogo(t0, type=c("diff"), pvalueCutoff=0.05, font="Helvetica", fontface = "plain", fontsize = 8, legend=F)
+
+
+```
+
+```{r human inv}
+
+x <- hphosavs %>%
+  filter (directionfc ==2)
+xplus <- hphosavs %>%
+  filter (!directionfc ==2)
+
+fg.seqs = as.character(x$Sequence.window)
+fg.seqs <- substr(fg.seqs, 6, 26)
+bg.seqs = as.character(xplus$Sequence.window)
+bg.seqs <- substr(bg.seqs, 6, 26)
+
+bg.seqs <- gsub("_", "X", bg.seqs)
+bg.names = as.character(xplus$uniprot)
+
+X <- data.frame(bg.names, bg.seqs)
+writeFasta(X, "example.fasta")
+
+##MotifX
+mot = motifx(fg.seqs, bg.seqs, central.res = 'STY', min.seqs = 10, pval.cutoff = 5e-2)
+print(mot)
+
+##Sequence logo
+
+dat <- unlist(fg.seqs)
+
+##prepare proteome from a fasta file
+proteome <- prepareProteome(fasta = "example.fasta", 
+                            species = "Homo sapiens")
+
+##prepare an object of dagPeptides
+seq <- formatSequence(seq = dat, proteome = proteome, upstreamOffset = 10,
+                      downstreamOffset = 10)
+
+bg_fisher <- buildBackgroundModel(seq, background = "wholeProteome", 
+                                  proteome = proteome, testType = "fisher")
+bg_ztest <- buildBackgroundModel(seq, background = "wholeProteome", 
+                                 proteome = proteome, testType = "ztest")
+
+t0 <- testDAU(dagPeptides = seq, dagBackground = bg_fisher)
+
+dagLogo(t0, type=c("diff"), pvalueCutoff=0.05, font="Helvetica", fontface = "plain", fontsize = 8, legend=F)
+
+```
+
+```{r mouse prop}
+
+x <- mphosavs %>%
+  filter (directionfc ==1)
+xplus <- mphosavs %>%
+  filter (!directionfc ==1)
+
+fg.seqs = as.character(x$Sequence.window)
+fg.seqs <- substr(fg.seqs, 6, 26)
+bg.seqs = as.character(xplus$Sequence.window)
+bg.seqs <- substr(bg.seqs, 6, 26)
+
+bg.seqs <- gsub("_", "X", bg.seqs)
+bg.names = as.character(xplus$uniprot)
+
+X <- data.frame(bg.names, bg.seqs)
+writeFasta(X, "example.fasta")
+
+##MotifX
+mot = motifx(fg.seqs, bg.seqs, central.res = 'STY', min.seqs = 10, pval.cutoff = 5e-2)
+print(mot)
+
+
+##Sequence logo
+
+dat <- unlist(fg.seqs)
+
+##prepare proteome from a fasta file
+proteome <- prepareProteome(fasta = "example.fasta", 
+                            species = "Mus musculus")
+
+##prepare an object of dagPeptides
+seq <- formatSequence(seq = dat, proteome = proteome, upstreamOffset = 10,
+                      downstreamOffset = 10)
+
+bg_fisher <- buildBackgroundModel(seq, background = "wholeProteome", 
+                                  proteome = proteome, testType = "fisher")
+bg_ztest <- buildBackgroundModel(seq, background = "wholeProteome", 
+                                 proteome = proteome, testType = "ztest")
+
+t0 <- testDAU(dagPeptides = seq, dagBackground = bg_fisher)
+t2 <- testDAU(dagPeptides = seq, dagBackground = bg_fisher, 
+             groupingScheme = "charge_group")
+
+dagLogo(t0, type=c("diff"), pvalueCutoff=0.05, font="Helvetica", fontface = "plain", fontsize = 8, legend=F)
+
+```
+
+
+```{r mouse inv}
+
+x <- mphosavs %>%
+  filter (directionfc ==2)
+xplus <- mphosavs %>%
+  filter (!directionfc ==2)
+
+fg.seqs = as.character(x$Sequence.window)
+fg.seqs <- substr(fg.seqs, 6,26)
+bg.seqs = as.character(xplus$Sequence.window)
+bg.seqs <- substr(bg.seqs, 6,26)
+
+bg.seqs <- gsub("_", "X", bg.seqs)
+bg.names = as.character(xplus$uniprot)
+
+X <- data.frame(bg.names, bg.seqs)
+writeFasta(X, "example.fasta")
+
+##MotifX
+mot = motifx(fg.seqs, bg.seqs, central.res = 'STY', min.seqs = 10, pval.cutoff = 5e-2)
+print(mot)
+
+
+##Sequence logo
+
+dat <- unlist(fg.seqs)
+
+##prepare proteome from a fasta file
+proteome <- prepareProteome(fasta = "example.fasta", 
+                            species = "Mus musculus")
+
+##prepare an object of dagPeptides
+seq <- formatSequence(seq = dat, proteome = proteome, upstreamOffset = 10,
+                      downstreamOffset = 10)
+
+bg_fisher <- buildBackgroundModel(seq, background = "wholeProteome", 
+                                  proteome = proteome, testType = "fisher")
+bg_ztest <- buildBackgroundModel(seq, background = "wholeProteome", 
+                                 proteome = proteome, testType = "ztest")
+
+t0 <- testDAU(dagPeptides = seq, dagBackground = bg_fisher)
+t2 <- testDAU(dagPeptides = seq, dagBackground = bg_fisher, 
+             groupingScheme = "charge_group")
+
+dagLogo(t0, type=c("diff"), pvalueCutoff=0.05, font="Helvetica", fontface = "plain", fontsize = 8, legend=F)
+
+```
+
+
+
+
+```{r adapt}
+
+
+```
+
+```{r h warm}
+
+x <- hphoshvlavs %>%
+  filter (directionfc ==1)
+xplus <- hphoshvlavs %>%
+  filter (!directionfc ==1)
+
+fg.seqs = as.character(x$Sequence.window)
+fg.seqs <- substr(fg.seqs, 6, 26)
+bg.seqs = as.character(xplus$Sequence.window)
+bg.seqs <- substr(bg.seqs, 6, 26)
+
+bg.seqs <- gsub("_", "X", bg.seqs)
+bg.names = as.character(xplus$uniprot)
+
+X <- data.frame(bg.names, bg.seqs)
+writeFasta(X, "example.fasta")
+
+##MotifX
+mot = motifx(fg.seqs, bg.seqs, central.res = 'STY', min.seqs = 10, pval.cutoff = 5e-2)
+print(mot)
+
+
+##Sequence logo
+
+dat <- unlist(fg.seqs)
+
+##prepare proteome from a fasta file
+proteome <- prepareProteome(fasta = "example.fasta", 
+                            species = "Homo sapiens") #Homo sapiens Mus musculus
+
+##prepare an object of dagPeptides
+seq <- formatSequence(seq = dat, proteome = proteome, upstreamOffset = 10,
+                      downstreamOffset = 10)
+
+bg_fisher <- buildBackgroundModel(seq, background = "wholeProteome", 
+                                  proteome = proteome, testType = "fisher")
+bg_ztest <- buildBackgroundModel(seq, background = "wholeProteome", 
+                                 proteome = proteome, testType = "ztest")
+
+t0 <- testDAU(dagPeptides = seq, dagBackground = bg_fisher)
+dagLogo(t0, type=c("diff"), pvalueCutoff=0.05, font="Helvetica", fontface = "plain", fontsize = 8, legend=F)
+
+```
+
+```{r h cold}
+
+x <- hphoshvlavs %>%
+  filter (directionfc ==2)
+xplus <- hphoshvlavs %>%
+  filter (!directionfc ==2)
+
+fg.seqs = as.character(x$Sequence.window)
+fg.seqs <- substr(fg.seqs, 1, 31)
+bg.seqs = as.character(xplus$Sequence.window)
+bg.seqs <- substr(bg.seqs, 1, 31)
+
+bg.seqs <- gsub("_", "X", bg.seqs)
+bg.names = as.character(xplus$uniprot)
+
+X <- data.frame(bg.names, bg.seqs)
+writeFasta(X, "example.fasta")
+
+##MotifX
+mot = motifx(fg.seqs, bg.seqs, central.res = 'STY', min.seqs = 10, pval.cutoff = 5e-2)
+print(mot)
+
+
+##Sequence logo
+
+dat <- unlist(fg.seqs)
+
+##prepare proteome from a fasta file
+proteome <- prepareProteome(fasta = "example.fasta", 
+                            species = "Homo sapiens") #Homo sapiens Mus musculus
+
+##prepare an object of dagPeptides
+seq <- formatSequence(seq = dat, proteome = proteome, upstreamOffset = 10,
+                      downstreamOffset = 10)
+
+bg_fisher <- buildBackgroundModel(seq, background = "wholeProteome", 
+                                  proteome = proteome, testType = "fisher")
+bg_ztest <- buildBackgroundModel(seq, background = "wholeProteome", 
+                                 proteome = proteome, testType = "ztest")
+
+t0 <- testDAU(dagPeptides = seq, dagBackground = bg_fisher)
+dagLogo(t0, type=c("diff"), pvalueCutoff=0.05, font="Helvetica", fontface = "plain", fontsize = 8, legend=F)
+
+```
+
+
+```{r m warm}
+
+x <- mphoshvlavs %>%
+  filter (directionfc ==1)
+xplus <- mphoshvlavs %>%
+  filter (!directionfc ==1)
+
+fg.seqs = as.character(x$Sequence.window)
+fg.seqs <- substr(fg.seqs, 6, 26)
+bg.seqs = as.character(xplus$Sequence.window)
+bg.seqs <- substr(bg.seqs, 6, 26)
+
+bg.seqs <- gsub("_", "X", bg.seqs)
+bg.names = as.character(xplus$uniprot)
+
+X <- data.frame(bg.names, bg.seqs)
+writeFasta(X, "example.fasta")
+
+##MotifX
+mot = motifx(fg.seqs, bg.seqs, central.res = 'STY', min.seqs = 10, pval.cutoff = 5e-2)
+print(mot)
+
+
+##Sequence logo
+
+dat <- unlist(fg.seqs)
+
+##prepare proteome from a fasta file
+proteome <- prepareProteome(fasta = "example.fasta", 
+                            species = "Homo sapiens") #Homo sapiens Mus musculus
+
+##prepare an object of dagPeptides
+seq <- formatSequence(seq = dat, proteome = proteome, upstreamOffset = 10,
+                      downstreamOffset = 10)
+
+bg_fisher <- buildBackgroundModel(seq, background = "wholeProteome", 
+                                  proteome = proteome, testType = "fisher")
+bg_ztest <- buildBackgroundModel(seq, background = "wholeProteome", 
+                                 proteome = proteome, testType = "ztest")
+
+t0 <- testDAU(dagPeptides = seq, dagBackground = bg_fisher)
+dagLogo(t0, type=c("diff"), pvalueCutoff=0.05, font="Helvetica", fontface = "plain", fontsize = 8, legend=F)
+
+```
+
+```{r m cold}
+
+x <- mphoshvlavs %>%
+  filter (directionfc ==2)
+xplus <- mphoshvlavs %>%
+  filter (!directionfc ==2)
+
+fg.seqs = as.character(x$Sequence.window)
+fg.seqs <- substr(fg.seqs, 1, 31)
+bg.seqs = as.character(xplus$Sequence.window)
+bg.seqs <- substr(bg.seqs, 1, 31)
+
+bg.seqs <- gsub("_", "X", bg.seqs)
+bg.names = as.character(xplus$uniprot)
+
+X <- data.frame(bg.names, bg.seqs)
+writeFasta(X, "example.fasta")
+
+##MotifX
+mot = motifx(fg.seqs, bg.seqs, central.res = 'STY', min.seqs = 10, pval.cutoff = 5e-2)
+print(mot)
+
+
+##Sequence logo
+
+dat <- unlist(fg.seqs)
+
+##prepare proteome from a fasta file
+proteome <- prepareProteome(fasta = "example.fasta", 
+                            species = "Homo sapiens") #Homo sapiens Mus musculus
+
+##prepare an object of dagPeptides
+seq <- formatSequence(seq = dat, proteome = proteome, upstreamOffset = 10,
+                      downstreamOffset = 10)
+
+bg_fisher <- buildBackgroundModel(seq, background = "wholeProteome", 
+                                  proteome = proteome, testType = "fisher")
+bg_ztest <- buildBackgroundModel(seq, background = "wholeProteome", 
+                                 proteome = proteome, testType = "ztest")
+
+t0 <- testDAU(dagPeptides = seq, dagBackground = bg_fisher)
+dagLogo(t0, type=c("diff"), pvalueCutoff=0.05, font="Helvetica", fontface = "plain", fontsize = 8, legend=F)
+
+```
+
+
+```{r pathway highlighting}
+
+library(tidyverse)
+
+path <- read.csv("pathway_genes.csv")
+
+hprotavs_path <- hprotavs %>%
+  inner_join((path %>% filter(category == "heat") %>% 
+                mutate(main_gene = toupper(main_gene))), 
+     by = "main_gene")
+
+mprotavs_path <- mprotavs %>%
+  inner_join((path %>% filter(category == "heat") %>% 
+                mutate(main_gene = str_to_title(main_gene))), 
+     by = "main_gene")
+
+
+hphosavs_path <- hphosavs %>%
+  inner_join((path %>% filter(category != "heat") %>% rename(phosphosite = phosphosite.human)), 
+     by = "phosphosite")
+
+mphosavs_path <- mphosavs %>%
+  inner_join((path %>% filter(category != "heat") %>% rename(phosphosite = phosphosite.mouse)), 
+     by = "phosphosite")
+
+
+
+```
+
+

@@ -1,0 +1,566 @@
+---
+title: "venns"
+output: html_document
+date: "2024-11-12"
+---
+
+```{r setup, include=FALSE}
+
+if (!require("dplyr")) {
+  install.packages("dplyr", dependencies = TRUE)
+  library(dplyr)
+}
+
+
+if (!require("ggplot2")) {
+  install.packages("ggplot2", dependencies = TRUE)
+  library(ggplot2)
+}
+
+if (!require("ggExtra")) {
+  install.packages("ggExtra", dependencies = TRUE)
+  library(ggExtra)
+}
+
+if (!requireNamespace("ggVennDiagram", quietly = TRUE)) {
+    install.packages("ggVennDiagram")
+}
+library(ggVennDiagram)
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+BiocManager::install("pathview")
+library(pathview)
+
+#acute
+mphosavs <- read.csv("./Processed data/3mouse_phos_SL(prot)norm_FC.csv")
+hphosavs <- read.csv("./Processed data/3human_phos_SL(prot)norm_FC.csv")
+hprotavs <- read.csv("./Processed data/3human_prot_SL(prot)norm_FC.csv")
+mprotavs <- read.csv("./Processed data/3mouse_prot_SL(prot)norm_FC.csv")
+
+#adapt
+hphoshvl <- read.csv("./Processed data/3human_phos_SL(prot)norm_hvl.csv")
+mphoshvl <- read.csv("./Processed data/3mouse_phos_SL(prot)norm_hvl.csv")
+hprothvl <- read.csv("./Processed data/3human_prot_SL(prot)norm_hvl.csv")
+mprothvl <- read.csv("./Processed data/3mouse_prot_SL(prot)norm_hvl.csv")
+
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r mapping gene names}
+
+# Load the downloaded mapping file
+mapping <- read.csv("mouse_human_ortholog_mapping.csv") 
+
+mphosavs <- mphosavs %>%
+  left_join(mapping, by = c("main_gene" = "mouse_gene"))
+mphoshvl <- mphoshvl %>%
+  left_join(mapping, by = c("main_gene" = "mouse_gene"))
+
+```
+
+
+
+```{r overlapping total, echo=FALSE}
+#total sites
+length(hphosavs$main_gene)
+length(mphosavs$main_gene)
+length(hphoshvl$main_gene)
+length(mphoshvl$main_gene)
+
+
+# Filter out proteins with missing mappings
+mphosavs_filt <- mphosavs %>% filter(!is.na(human_gene))
+total_unique_sites_mouse <- unique(mphosavs$human_gene)
+hphosavs_filt<- hphosavs %>% rename(human_gene = main_gene)
+total_unique_sites_human <- unique(hphosavs_filt$human_gene)
+
+mphoshvl_filt <- mphoshvl %>% filter(!is.na(human_gene))
+total_unique_sites_mousehvl <- unique(mphoshvl_filt$human_gene)
+hphoshvl_filt <- hphoshvl %>% rename(human_gene = main_gene)
+total_unique_sites_humanhvl <- unique(hphoshvl_filt$human_gene)
+
+length(total_unique_sites_mouse)
+length(total_unique_sites_human)
+length(total_unique_sites_mousehvl)
+length(total_unique_sites_humanhvl)
+
+#write unique sites lists (which are human gene formatted) to file to enable venn diagram
+write.csv(total_unique_sites_mousehvl,"total_unique_sites_mousehvl.csv")
+
+# Merge the datasets by human gene names for comparison
+total_merged_data <- mphosavs_filt %>%
+  select(id, main_gene, phosphosite, directionfc, human_gene) %>%
+  rename(mouse_direction = directionfc) %>%
+  full_join(hphosavs_filt %>% select(human_gene, phosphosite, directionfc) %>% rename(human_direction = directionfc, human_phosphosite = phosphosite), by = "human_gene")
+
+
+total_merged_data_NArm <- na.omit(total_merged_data) 
+total_unique_sites_mergednarm <- unique(total_merged_data_NArm$human_gene)
+length(total_unique_sites_mergednarm)
+
+# Merge the datasets by human gene names for comparison
+total_merged_datahvl <- mphoshvl_filt %>%
+  select(id, main_gene, phosphosite, directionfc, human_gene) %>%
+  rename(mouse_direction = directionfc) %>%
+  full_join(hphoshvl_filt %>% select(human_gene, phosphosite, directionfc) %>% rename(human_direction = directionfc, human_phosphosite = phosphosite), by = "human_gene")
+
+
+total_merged_data_hvl_NArm <- na.omit(total_merged_datahvl) 
+total_unique_sites_mergednarm_hvl <- unique(total_merged_data_hvl_NArm$human_gene)
+length(total_unique_sites_mergednarm_hvl)
+
+
+```
+
+
+
+```{r overlapping significant, echo=FALSE}
+#total sites
+length(hphosavs$main_gene)
+length(mphosavs$main_gene)
+length(hphoshvl$main_gene)
+length(mphoshvl$main_gene)
+
+#significantly changing sites
+hphosavs_sig <- hphosavs %>% subset(qVal < 0.05)
+mphosavs_sig <- mphosavs %>% subset(qVal < 0.05)
+hphoshvl_sig <- hphoshvl %>% subset(qVal < 0.05)
+mphoshvl_sig <- mphoshvl %>% subset(qVal < 0.05)
+
+length(hphosavs_sig$main_gene)
+length(mphosavs_sig$main_gene)
+length(hphoshvl_sig$main_gene)
+length(mphoshvl_sig$main_gene)
+
+# Filter out proteins with missing mappings
+mphosavs_sig_filt <- mphosavs_sig %>% filter(!is.na(human_gene))
+unique_sites_mouse <- unique(mphosavs_sig_filt$human_gene)
+hphosavs_sig_filt<- hphosavs_sig %>% rename(human_gene = main_gene)
+unique_sites_human <- unique(hphosavs_sig_filt$human_gene)
+
+mphoshvl_sig_filt <- mphoshvl_sig %>% filter(!is.na(human_gene))
+unique_sites_mousehvl <- unique(mphoshvl_sig_filt$human_gene)
+hphoshvl_sig_filt <- hphoshvl_sig %>% rename(human_gene = main_gene)
+unique_sites_humanhvl <- unique(hphoshvl_sig_filt$human_gene)
+
+length(unique_sites_mouse)
+length(unique_sites_human)
+length(unique_sites_mousehvl)
+length(unique_sites_humanhvl)
+
+#write unique sites lists (which are human gene formatted) to file to enable venn diagram
+write.csv(unique_sites_mousehvl,"unique_sites_mousehvl.csv")
+
+# Merge the datasets by human gene names for comparison
+merged_data <- mphosavs_sig_filt %>%
+  select(id, main_gene, phosphosite, directionfc, human_gene) %>%
+  rename(mouse_direction = directionfc) %>%
+  full_join(hphosavs_sig_filt %>% select(human_gene, phosphosite, directionfc) %>% rename(human_direction = directionfc, human_phosphosite = phosphosite), by = "human_gene")
+
+
+merged_data_NArm <- na.omit(merged_data) 
+unique_sites_mergednarm <- unique(merged_data_NArm$human_gene)
+length(unique_sites_mergednarm)
+
+# Merge the datasets by human gene names for comparison
+merged_datahvl <- mphoshvl_sig_filt %>%
+  select(id, main_gene, phosphosite, directionfc, human_gene) %>%
+  rename(mouse_direction = directionfc) %>%
+  full_join(hphoshvl_sig_filt %>% select(human_gene, phosphosite, directionfc) %>% rename(human_direction = directionfc, human_phosphosite = phosphosite), by = "human_gene")
+
+
+merged_data_hvl_NArm <- na.omit(merged_datahvl) 
+unique_sites_mergednarm_hvl <- unique(merged_data_hvl_NArm$human_gene)
+length(unique_sites_mergednarm_hvl)
+
+
+```
+
+```{r}
+
+filtered_hphosavs_sig <- hphosavs_sig %>%
+  filter(main_gene %in% unique_sites_mergednarm)
+
+filtered_mphosavs_sig <- mphosavs_sig %>%
+  filter(human_gene %in% unique_sites_mergednarm)
+
+filtered_hphoshvl_sig <- hphoshvl_sig %>%
+  filter(main_gene %in% unique_sites_mergednarm_hvl)
+
+filtered_mphoshvl_sig <- mphoshvl_sig %>%
+  filter(human_gene %in% unique_sites_mergednarm_hvl)
+
+length(filtered_hphosavs_sig$main_gene)
+length(filtered_mphosavs_sig$human_gene)
+length(filtered_hphoshvl_sig$main_gene)
+length(filtered_mphoshvl_sig$human_gene)
+
+write.csv(filtered_hphosavs_sig,"filtered_hphosavs_sig.csv")
+write.csv(filtered_mphosavs_sig,"filtered_mphosavs_sig.csv")
+write.csv(filtered_hphoshvl_sig,"filtered_hphoshvl_sig.csv")
+write.csv(filtered_mphoshvl_sig,"filtered_mphoshvl_sig.csv")
+```
+
+
+```{r}
+# Filter out proteins with missing mappings
+mphosavs_filt <- mphosavs %>% filter(!is.na(human_gene))
+unique_sites_mouse_all <- unique(mphosavs_filt$human_gene)
+hphosavs_filt<- hphosavs %>% rename(human_gene = main_gene)
+unique_sites_human_all <- unique(hphosavs_filt$human_gene)
+
+mphoshvl_filt <- mphoshvl %>% filter(!is.na(human_gene))
+unique_sites_mousehvl_all <- unique(mphoshvl_filt$human_gene)
+hphoshvl_filt <- hphoshvl %>% rename(human_gene = main_gene)
+unique_sites_humanhvl_all <- unique(hphoshvl_filt$human_gene)
+
+length(unique_sites_mouse_all)
+length(unique_sites_human_all)
+length(unique_sites_mousehvl_all)
+length(unique_sites_humanhvl_all)
+
+#write unique sites lists (which are human gene formatted) to file to enable venn diagram
+#write.csv(unique_sites_mouse_all,"unique_sites_mouse_all")
+
+# Merge the datasets by human gene names for comparison - acute
+merged_data_all <- mphosavs_filt %>%
+  select(id, main_gene, phosphosite, directionfc, human_gene) %>%
+  rename(mouse_direction = directionfc) %>%
+  full_join(hphosavs_filt %>% select(human_gene, phosphosite, directionfc) %>% rename(human_direction = directionfc, human_phosphosite = phosphosite), by = "human_gene")
+
+
+merged_data_all_NArm <- na.omit(merged_data_all) 
+unique_sites_all_mergednarm <- unique(merged_data_all_NArm$human_gene)
+length(unique_sites_all_mergednarm)
+
+# Merge the datasets by human gene names for comparison - adapt
+merged_datahvl_all <- mphoshvl_filt %>%
+  select(id, main_gene, phosphosite, directionfc, human_gene) %>%
+  rename(mouse_direction = directionfc) %>%
+  full_join(hphoshvl_filt %>% select(human_gene, phosphosite, directionfc) %>% rename(human_direction = directionfc, human_phosphosite = phosphosite), by = "human_gene")
+
+
+merged_data_hvl_all_NArm <- na.omit(merged_datahvl_all) 
+unique_sites_all_mergednarm_hvl <- unique(merged_data_hvl_all_NArm$human_gene)
+length(unique_sites_all_mergednarm_hvl)
+
+
+
+#without the significance preselection:
+filtered_hphosavs <- hphosavs_filt %>%
+  filter(human_gene %in% unique_sites_all_mergednarm)
+
+filtered_mphosavs <- mphosavs_filt %>%
+  filter(human_gene %in% unique_sites_all_mergednarm)
+
+filtered_hphoshvl <- hphoshvl_filt %>%
+  filter(human_gene %in% unique_sites_all_mergednarm_hvl)
+
+filtered_mphoshvl <- mphoshvl_filt %>%
+  filter(human_gene %in% unique_sites_all_mergednarm_hvl)
+
+length(filtered_hphosavs$human_gene)
+length(filtered_mphosavs$human_gene)
+length(filtered_hphoshvl$human_gene)
+length(filtered_mphoshvl$human_gene)
+
+filtered_hphosavs_all_sig <- filtered_hphosavs %>% subset(qVal < 0.05)
+length(filtered_hphosavs_all_sig$phosphosite)
+length(unique(filtered_hphosavs_all_sig$human_gene))
+
+filtered_mphosavs_all_sig <- filtered_mphosavs %>% subset(qVal < 0.05)
+length(filtered_mphosavs_all_sig$phosphosite)
+length(unique(filtered_mphosavs_all_sig$human_gene))
+
+filtered_hphoshvl_all_sig <- filtered_hphoshvl %>% subset(qVal < 0.05)
+length(filtered_hphoshvl_all_sig$phosphosite)
+length(unique(filtered_hphoshvl_all_sig$human_gene))
+
+filtered_mphoshvl_all_sig <- filtered_mphoshvl %>% subset(qVal < 0.05)
+length(filtered_mphoshvl_all_sig$phosphosite)
+length(unique(filtered_mphoshvl_all_sig$human_gene))
+```
+
+```{r trying to autoalign and assign}
+if (!requireNamespace("Biostrings", quietly = TRUE)) {
+  install.packages("Biostrings", repos = "http://bioconductor.org/packages/release/bioc/")
+}
+library(Biostrings)
+
+map_phosphosites <- function(human_seq, mouse_seq) {
+  # Restrict to first 31 amino acids
+  human_seq <- substr(human_seq, 1, 31)
+  mouse_seq <- substr(mouse_seq, 1, 31)
+  
+  # Ensure both sequences are 31 characters long
+  if (nchar(human_seq) != 31 || nchar(mouse_seq) != 31) {
+    return(NA)
+  }
+  
+  # Align sequences with a focus on the center (position 16)
+  alignment <- pairwiseAlignment(human_seq, mouse_seq, type = "local")
+  
+  # Extract aligned sequences
+  aligned_human <- as.character(alignedPattern(alignment))
+  aligned_mouse <- as.character(alignedSubject(alignment))
+  
+  # Check central position
+  human_center <- substr(aligned_human, 16, 16)
+  mouse_center <- substr(aligned_mouse, 16, 16)
+  
+  if (human_center != "-") {
+    # Return the mouse residue at the central position
+    return(mouse_center)
+  } else {
+    # If the central position does not align, return NA
+    return(NA)
+  }
+}
+
+mapped_results <- lapply(unique(filtered_hphosavs_sig$Protein), function(protein) {
+  # Subset human and mouse data for the current protein
+  human_data <- filtered_hphosavs_sig[filtered_hphosavs_sig$Protein == protein, ]
+  mouse_data <- filtered_mphosavs_sig[filtered_mphosavs_sig$Protein == protein, ]
+  
+  if (nrow(human_data) > 0 & nrow(mouse_data) > 0) {
+    # Map phosphosites for each sequence window
+    mapped_sites <- Map(function(hseq, mseq) {
+      map_phosphosites(hseq, mseq)
+    },
+    hseq = human_data$Sequence.window,
+    mseq = rep(mouse_data$Sequence.window, length.out = nrow(human_data)))
+    
+    # Add mapped sites to the human data
+    human_data$mapped_mouse_site <- unlist(mapped_sites)
+  } else {
+    human_data$mapped_mouse_site <- NA
+  }
+  
+  return(human_data)
+})
+
+# Combine all results
+mapped_human_to_mouse <- do.call(rbind, mapped_results)
+
+
+
+```
+
+```{r}
+
+
+# Classify the overlaps based on response direction - crude, protein level comparison only
+same_direction_both <- merged_data_NArm %>% filter(mouse_direction == "PROP" & human_direction == "PROP" | mouse_direction == "INV" & human_direction == "INV") 
+not_signif_or_other_direction_both <- merged_data_NArm %>% filter(mouse_direction == "OTHER" & human_direction == "OTHER")
+
+prop_mouse_inv_or_other_human <- merged_data_NArm %>% filter(mouse_direction == "PROP" & human_direction == "INV" | mouse_direction == "PROP" & human_direction == "OTHER")
+inv_mouse_prop_or_other_human <- merged_data_NArm %>% filter(mouse_direction == "INV" & human_direction == "PROP" | mouse_direction == "INV" & human_direction == "OTHER")
+
+opposite_direction_both <- merged_data_NArm %>% filter(
+  mouse_direction == "PROP" & human_direction == "INV" | 
+    mouse_direction == "PROP" & human_direction == "OTHER" | 
+    mouse_direction == "INV" & human_direction == "PROP" | 
+    mouse_direction == "INV" & human_direction == "OTHER"| 
+    human_direction == "PROP" & mouse_direction == "OTHER" | 
+    human_direction == "INV" & mouse_direction == "OTHER")
+
+
+# Counts for Venn diagram
+counts <- list(
+  "Same direction" = unique(same_direction_both$main_gene),
+  "Opposite direction" = unique(opposite_direction_both$main_gene),
+  "Other/Not significant direction in either" = unique(not_signif_or_other_direction_both$main_gene))
+
+common_elements <- counts$`Same direction`[counts$`Same direction` %in% counts$`Opposite direction`]
+length(counts$`Same direction`)
+length(counts$`Opposite direction`)
+length(counts$`Other/Not significant direction in either`)
+length(common_elements)
+
+
+
+# # Generate the Venn diagram
+# venn.plot <- venn.diagram(
+#   x = counts,
+#   category.names = c("Proportional in Mouse", "Inversely Proportional in Mouse", "Significant in Human"),
+#   filename = NULL,  # Use NULL to keep it in the R session
+#   output = TRUE,
+#   fill = c("#ff9999", "#9999ff", "#99ff99"),
+#   alpha = 0.5,
+#   cex = 1.5,
+#   cat.cex = 1.2,
+#   cat.pos = c(-20, 20, 135)
+# )
+# 
+# # Plot the Venn diagram
+# grid.draw(venn.plot)
+
+```
+
+```{r}
+
+# Install packages if you haven't already
+if (!requireNamespace("BiocManager", quietly = TRUE)) install.packages("BiocManager")
+BiocManager::install("clusterProfiler")
+BiocManager::install("org.Hs.eg.db")  # For human genes; change to "org.Mm.eg.db" for mouse
+BiocManager::install("enrichplot")  # Optional for plotting results
+BiocManager::install("pathview")  # For visualizing KEGG pathways
+
+library(clusterProfiler)
+library(org.Hs.eg.db)  # Use org.Mm.eg.db for mouse, org.Rn.eg.db for rat, etc.
+library(enrichplot)
+
+
+# Convert to gene lists to Entrez IDs (for human genes), 
+gene_ids_opposite <- bitr(c(unique(opposite_direction_both$human_gene)), fromType = "SYMBOL", toType = "ENTREZID", OrgDb = org.Hs.eg.db)
+gene_ids_same <- bitr(c(unique(same_direction_both$human_gene)), fromType = "SYMBOL", toType = "ENTREZID", OrgDb = org.Hs.eg.db)
+gene_ids_other <- bitr(c(unique(not_signif_or_other_direction_both$human_gene)), fromType = "SYMBOL", toType = "ENTREZID", OrgDb = org.Hs.eg.db)
+
+gene_ids_total <- bitr(c(unique(merged_data_NArm$human_gene)), fromType = "SYMBOL", toType = "ENTREZID", OrgDb = org.Hs.eg.db)
+
+# Run KEGG pathway enrichment analysis
+kegg_results_opposite <- enrichKEGG(
+  gene = gene_ids_opposite$ENTREZID,
+   #universe = gene_ids_total$ENTREZID,
+  organism = "hsa",  # "hsa" for human; use "mmu" for mouse, "rno" for rat, etc.
+  pvalueCutoff = 0.05
+)
+
+kegg_results_same <- enrichKEGG(
+  gene = gene_ids_same$ENTREZID,
+  universe = gene_ids_total$ENTREZID,
+  organism = "hsa",  # "hsa" for human; use "mmu" for mouse, "rno" for rat, etc.
+  pvalueCutoff = 0.05
+)
+
+kegg_results_other <- enrichKEGG(
+  gene = gene_ids_other$ENTREZID,
+  universe = gene_ids_total$ENTREZID,
+  organism = "hsa",  # "hsa" for human; use "mmu" for mouse, "rno" for rat, etc.
+  pvalueCutoff = 0.05
+)
+
+oppositekegg <- kegg_results_opposite@result %>% filter(qvalue < 0.05)
+samekegg <- kegg_results_same@result %>% filter(qvalue < 0.05)
+otherkegg <- kegg_results_other@result %>% filter(qvalue < 0.05)
+
+# Check if mTOR pathway is among the enriched pathways
+mtor_pathway_opposite <- kegg_results_opposite@result[grepl("mTOR", kegg_results_opposite@result$Description), ]
+print(mtor_pathway_opposite)
+
+mtor_pathway_same <- kegg_results_same@result[grepl("mTOR", kegg_results_same@result$Description), ]
+print(mtor_pathway_same)
+
+mtor_pathway_other <- kegg_results_other@result[grepl("mTOR", kegg_results_other@result$Description), ]
+print(mtor_pathway_other)
+
+
+# Visualize the pathways mtor="hsa04150", WNK is in different pathway
+pathview(gene.data = gene_ids_total$ENTREZID, pathway.id = "hsa04150", species = "hsa")
+pathview(gene.data = gene_ids_opposite$ENTREZID, pathway.id = "hsa04144", species = "hsa")
+
+```
+```{r a "net" phosphorylation approach}
+
+net_direction_mouse <- mphosavs %>%
+  group_by(main_gene) %>%
+  summarize(mouse_direction = case_when(
+    sum(directionfc == "PROP") > sum(directionfc == "INV") ~ "PROP",  # If more 'PROP' than 'INV'
+    sum(directionfc == "INV") > sum(directionfc == "PROP") ~ "INV",  # If more 'INV' than 'PROP'
+    TRUE ~ "OTHER"  # If equal or other cases (e.g., no 'PROP' or 'INV' detected)
+  ))
+
+net_direction_mouse <- net_direction_mouse %>%
+  left_join(mapping, by = c("main_gene" = "mouse_gene"))
+
+net_direction_human <- hphosavs %>%
+  group_by(main_gene) %>%
+  summarize(human_direction = case_when(
+    sum(directionfc == "PROP") > sum(directionfc == "INV") ~ "PROP",  # If more 'PROP' than 'INV'
+    sum(directionfc == "INV") > sum(directionfc == "PROP") ~ "INV",  # If more 'INV' than 'PROP'
+    TRUE ~ "OTHER"  # If equal or other cases (e.g., no 'PROP' or 'INV' detected)
+  )) %>% rename(human_gene = main_gene)
+
+#if I wanted to count OTHER into it: sum(directionfc == "PROP") >= sum(directionfc == "INV") + sum(directionfc == "OTHER") ~ "PROP",  # More or equal 'PROP' than 'INV' + 'OTHER'
+
+# Merge by gene to compare net directions
+merged_net_direction <- left_join(net_direction_mouse, net_direction_human, by = "human_gene")
+
+# Classify based on net phosphorylation direction
+same_net_direction_both <- merged_net_direction %>%
+  filter(mouse_direction == "PROP" & human_direction == "PROP" | 
+         mouse_direction == "INV" & human_direction == "INV")
+
+opposite_net_direction_both <- merged_net_direction %>%
+  filter(mouse_direction == "PROP" & human_direction == "INV" | 
+    mouse_direction == "PROP" & human_direction == "OTHER" | 
+    mouse_direction == "INV" & human_direction == "PROP" | 
+    mouse_direction == "INV" & human_direction == "OTHER"| 
+    human_direction == "PROP" & mouse_direction == "OTHER" | 
+    human_direction == "INV" & mouse_direction == "OTHER")
+
+not_signif_or_other_net_direction_both <- merged_net_direction %>%
+  filter(mouse_direction == "OTHER" & human_direction == "OTHER")
+
+# Counts for Venn diagram
+counts <- list(
+  "Same direction" = same_net_direction_both$main_gene,
+  "Opposite direction" = opposite_net_direction_both$main_gene,
+  "Other/Not significant direction in either" = not_signif_or_other_net_direction_both$main_gene
+)
+
+```
+
+```{r pathway on the net direction}
+
+# Convert to gene lists to Entrez IDs (for human genes), 
+gene_ids_net_opposite <- bitr(c(unique(opposite_net_direction_both$human_gene)), fromType = "SYMBOL", toType = "ENTREZID", OrgDb = org.Hs.eg.db)
+gene_ids_net_same <- bitr(c(unique(same_net_direction_both$human_gene)), fromType = "SYMBOL", toType = "ENTREZID", OrgDb = org.Hs.eg.db)
+gene_ids_net_other <- bitr(c(unique(not_signif_or_other_net_direction_both$human_gene)), fromType = "SYMBOL", toType = "ENTREZID", OrgDb = org.Hs.eg.db)
+
+gene_ids_net_total <- bitr(c(unique(merged_net_direction$human_gene)), fromType = "SYMBOL", toType = "ENTREZID", OrgDb = org.Hs.eg.db) #includes some with NAs
+
+# Run KEGG pathway enrichment analysis
+kegg_results_net_opposite <- enrichKEGG(
+  gene = gene_ids_net_opposite$ENTREZID,
+  universe = gene_ids_net_total$ENTREZID,
+  organism = "hsa",  # "hsa" for human; use "mmu" for mouse, "rno" for rat, etc.
+  pvalueCutoff = 0.05
+)
+
+kegg_results_net_same <- enrichKEGG(
+  gene = gene_ids_net_same$ENTREZID,
+  universe = gene_ids_net_total$ENTREZID,
+  organism = "hsa",  # "hsa" for human; use "mmu" for mouse, "rno" for rat, etc.
+  pvalueCutoff = 0.05
+)
+
+kegg_results_net_other <- enrichKEGG(
+  gene = gene_ids_net_other$ENTREZID,
+  universe = gene_ids_net_total$ENTREZID,
+  organism = "hsa",  # "hsa" for human; use "mmu" for mouse, "rno" for rat, etc.
+  pvalueCutoff = 0.05
+)
+
+# Check if mTOR pathway is among the enriched pathways
+mtor_pathway_net_opposite <- kegg_results_net_opposite@result[grepl("mTOR", kegg_results_net_opposite@result$Description), ]
+print(mtor_pathway_net_opposite)
+
+mtor_pathway_net_same <- kegg_results_net_same@result[grepl("mTOR", kegg_results_net_same@result$Description), ]
+print(mtor_pathway_net_same)
+
+mtor_pathway_net_other <- kegg_results_net_other@result[grepl("mTOR", kegg_results_net_other@result$Description), ]
+print(mtor_pathway_net_other)
+
+
+# Visualize the pathways mtor="hsa04150", WNK is in different pathway
+pathview(gene.data = gene_ids_total$ENTREZID, pathway.id = "hsa04150", species = "hsa")
+
+```
+

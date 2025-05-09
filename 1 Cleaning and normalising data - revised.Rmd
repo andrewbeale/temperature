@@ -1,0 +1,664 @@
+---
+title: "Sample loading normalisation - proteome and phosphoproteome"
+output: "Sample loading-normalised proteome and phosphoproteome data in 8 csv files for downstream analysis"
+---
+
+```{r}
+#######################################################################################################################################
+# Notebook - DESCRIPTION
+#
+# Here we take the raw proteomics and phosphoproteomics data (output of Perseus without NA-filtering).
+# We apply sample loading normalisation to correct for small errors in pipetting - this assumes equal protein was used for all samples submitted for TMT labelling. The #sample loading correction for the proteome is applied to the phosphoproteome (rather than calculating a sample loading correction based upon phosphoproteome values) - as #this corrects for sample loading while allowing real differences in the amount of phosphoprotein after PE in each sample.
+# Along the way we plot the data to make sure that we can spot obvious mistakes. Boxplots and density plots show how the sample normalisation alters the values
+# Data is subsequently transformed and calculated to provide log2 transformed normalised values per replicate or log2 transformed fold changes per replicate depending on #downstream analysis
+# Finally, we export the data because this is handy for plotting proteins of interest in other software!
+#
+# INPUTS = raw data from Perseus (.txt)
+# OUTPUTS = normalised data for further analysis (.csv)
+#
+# This code has been adapted from David Wong https://github.com/davwong47/Circadian-proteomics
+#######################################################################################################################################
+```
+
+```{r setup and import data}
+#setup
+
+# Clear your workspace
+rm(list=ls())
+
+# Load useful packages
+if (!require("tidyverse")) {
+  install.packages("tidyverse", dependencies = TRUE)
+  library(tidyverse)
+} 
+
+if (!require("BiocManager")) {
+  install.packages("BiocManager", dependencies = TRUE)
+}
+
+if (!require("edgeR")) {
+  BiocManager::install("edgeR")
+  library(edgeR)
+} 
+
+if (!require("psych")) {
+  install.packages("psych", dependencies = TRUE)
+  library(psych)
+} 
+
+if (!require("dplyr")) {
+  install.packages("dplyr", dependencies = TRUE)
+  library(dplyr)
+} 
+
+if (!require("ggplot2")) {
+  install.packages("ggplot2", dependencies = TRUE)
+  library(ggplot2)
+} 
+
+if (!require("gridExtra")) {
+  install.packages("gridExtra", dependencies = TRUE)
+  library(gridExtra)
+} 
+
+
+
+###get data
+
+# Make a list of all the .txt files in your working directory just so you can see what's going on
+X = list.files(".",".txt")
+
+# read the raw data file, and ensure "NaN" is interpreted as NA
+mdata_start <- read.delim("./Raw data/CRM5913_TMT12_mouse_prot_m12.txt", na = c("NaN"), stringsAsFactors = F) %>% 
+  slice(-1) %>% # Remove the first row which is just junk
+  mutate_at(vars(1:12), as.numeric) # Make the data numeric
+
+hdata_start <- read.delim("./Raw data/CRM5913_TMT16_human_prot_m13.txt", na = c("NaN"), stringsAsFactors = F) %>% 
+  select(-28) %>%
+  slice(-1) %>%
+  mutate_at(vars(1:12), as.numeric)
+
+mphosdata_start <- read.delim("./Raw data/CRM5913_TMT12_mouse_phos_m14.txt", na = c("NaN"), stringsAsFactors = F) %>% 
+  slice(-1) %>%
+  mutate_at(vars(1:12), as.numeric)
+
+hphosdata_start <- read.delim("./Raw data/CRM5913_TMT16_human_phos_m19.txt", na = c("NaN"), stringsAsFactors = F) %>% 
+  slice(-1) %>%
+  mutate_at(vars(1:12), as.numeric)
+
+
+```
+
+
+```{r clean up labelling}
+
+mphosdata_start <-  mphosdata_start %>% rename(Majority.protein.IDs = Proteins)
+hphosdata_start <-  hphosdata_start %>% rename(Majority.protein.IDs = Proteins)
+
+
+clean_protein_gene_data <- function(data_start) {
+  # Clean up majority protein IDs
+  proteins <- as.vector(data_start$Majority.protein.IDs)
+  
+  # Create empty vector to hold split protein IDs
+  protein_id <- vector("list", length(proteins))
+  
+  # For loop to separate multiple protein IDs in one line
+  for (i in 1:length(proteins)) {
+    protein_id[i] <- strsplit(proteins[i], ";")
+  }
+  
+  # Select only the first element (main protein) from each line
+  protein_ids <- unlist(lapply(protein_id, '[[', 1))
+  data_start$uniprot <- protein_ids
+  
+  # Do the same for gene names
+  genes <- as.vector(data_start$Gene.names)
+  gene_id <- vector("list", length(genes))
+  
+  for (i in 1:length(genes)) {
+    gene_id[i] <- strsplit(genes[i], ";")
+  }
+  
+  # Select only the first element (main gene) from each line
+  gene_names <- unlist(lapply(gene_id, '[', 1))
+  data_start$main_gene <- gene_names
+  
+  # Return the modified dataframe
+  return(data_start)
+}
+
+mdata_cleaned <- clean_protein_gene_data(mdata_start)
+hdata_cleaned <- clean_protein_gene_data(hdata_start)
+mphosdata_cleaned <- clean_protein_gene_data(mphosdata_start)
+hphosdata_cleaned <- clean_protein_gene_data(hphosdata_start)
+
+```
+
+
+```{r rename raw data columns according to condition and save}
+# Reorganise the data into 32 + 3237 + 37 + 3732
+
+x <- rename(mdata_cleaned, Mlow_1=M1, Mlow_2=M2, Mlow_3=M3, Mup_1=M4, Mup_2=M5, Mup_3=M6, Mhigh_1=M7, Mhigh_2=M8, Mhigh_3=M9, Mdown_1=M10, Mdown_2=M11, Mdown_3=M12) 
+mdata_cleaned <- select(x, id, uniprot, main_gene, Protein.names, Gene.names, Mlow_1, Mlow_2, Mlow_3, Mup_1, Mup_2, Mup_3, Mhigh_1, Mhigh_2, Mhigh_3, Mdown_1, Mdown_2, Mdown_3, Peptides:Majority.protein.IDs) 
+
+x <- rename(hdata_cleaned, Hlow_1=H1, Hlow_2=H2, Hlow_3=H3, Hup_1=H4, Hup_2=H5, Hup_3=H6, Hhigh_1=H7, Hhigh_2=H8, Hhigh_3=H9, Hdown_1=H10, Hdown_2=H11, Hdown_3=H12) 
+hdata_cleaned <- select(x, id, uniprot, main_gene, Protein.names, Gene.names, Hlow_1, Hlow_2, Hlow_3, Hup_1, Hup_2, Hup_3, Hhigh_1, Hhigh_2, Hhigh_3, Hdown_1, Hdown_2, Hdown_3, Peptides:Majority.protein.IDs) 
+
+x <- rename(mphosdata_cleaned, Mlow_1=M1, Mlow_2=M2, Mlow_3=M3, Mup_1=M4, Mup_2=M5, Mup_3=M6, Mhigh_1=M7, Mhigh_2=M8, Mhigh_3=M9, Mdown_1=M10, Mdown_2=M11, Mdown_3=M12) 
+mphosdata_cleaned <- select(x, id, uniprot, main_gene, Protein.names, Gene.names, Mlow_1, Mlow_2, Mlow_3, Mup_1, Mup_2, Mup_3, Mhigh_1, Mhigh_2, Mhigh_3, Mdown_1, Mdown_2, Mdown_3, Amino.acid:Protein, Sequence.window:Phospho..STY..Probabilities, Fasta.headers:Number.of.Phospho..STY.) 
+mphosdata_cleaned$phosphosite <- str_c(mphosdata_cleaned$main_gene,"_", mphosdata_cleaned$Amino.acid, mphosdata_cleaned$Position)
+
+
+x <- rename(hphosdata_cleaned, Hlow_1=H1, Hlow_2=H2, Hlow_3=H3, Hup_1=H4, Hup_2=H5, Hup_3=H6, Hhigh_1=H7, Hhigh_2=H8, Hhigh_3=H9, Hdown_1=H10, Hdown_2=H11, Hdown_3=H12) 
+hphosdata_cleaned <- select(x, id, uniprot, main_gene, Protein.names, Gene.names, Hlow_1, Hlow_2, Hlow_3, Hup_1, Hup_2, Hup_3, Hhigh_1, Hhigh_2, Hhigh_3, Hdown_1, Hdown_2, Hdown_3,  Amino.acid:Protein, Sequence.window:Phospho..STY..Probabilities, Fasta.headers:Number.of.Phospho..STY.) 
+hphosdata_cleaned$phosphosite <- str_c(hphosdata_cleaned$main_gene,"_", hphosdata_cleaned$Amino.acid, hphosdata_cleaned$Position)
+
+write.csv(mdata_cleaned,"./Processed data/1mprotdata_start.csv")
+write.csv(hdata_cleaned,"./Processed data/1hprotdata_start.csv")
+write.csv(mphosdata_cleaned,"./Processed data/1mphosdata_start.csv")
+write.csv(hphosdata_cleaned,"./Processed data/1hphosdata_start.csv")
+
+```
+
+```{r Examine data}
+
+###functions and plots
+
+#boxplotTMT - boxplot of log transformed data
+boxplotTMT <- function(df, y2) {
+  df %>%
+    ggplot(aes(x = sample, y = log2({{ y2 }}))) + 
+    geom_boxplot() +
+    labs(x = "TMT Sample", y = "log2 of Intensity") +
+    theme(
+      plot.title = element_text(size = 8), 
+      axis.title = element_text(size = 6), 
+      axis.text = element_text(size = 6)
+    )
+}
+
+
+#norm_dens - plot of log transformed data
+norm_dens <- function(df, x2){ df  %>%
+
+    # Step 2: Plot the density lines, color by 'color_group'
+  ggplot(aes(x = log2({{ x2 }}), color = sample)) +
+    # Step 3: Add density lines without fill
+  geom_density(size = 1) +  # Set line size for better visibility
+    # Step 4: Set plot titles and labels
+  ggtitle("SL Data (Density of log2-transformed counts)") +
+  xlab("log2(Intensity)") +
+  ylab("Density") +
+    # Step 5: Minimal theme for better visuals
+  theme_minimal() +
+    # Step 6: Customize the color scale to repeat colors in groups of 3
+  scale_color_discrete()}
+
+
+
+
+# Remove rows which contain NaN within the data columns
+mprotdata <- na.omit(mdata_cleaned)
+hprotdata <- na.omit(hdata_cleaned)
+mphosdata <- na.omit(mphosdata_cleaned)
+hphosdata <- na.omit(hphosdata_cleaned)
+
+#for phos data, select Multiplicity ___1
+mphosdata <- mphosdata %>% filter(Multiplicity=="___1")
+hphosdata <- hphosdata %>% filter(Multiplicity=="___1")
+
+# Extract data only and tidy
+long_data_raw <- function(x) {
+  x %>% select(id, 6:17) %>% pivot_longer(cols = starts_with(c("M", "H")), names_to = "sample", values_to = "count")
+}
+
+long_mprotdata <- long_data_raw(mprotdata)  
+long_hprotdata <- long_data_raw(hprotdata)
+long_mphosdata <- long_data_raw(mphosdata)  
+long_hphosdata <- long_data_raw(hphosdata)
+
+```
+
+```{r Normisation of data by sample loading correction}
+#Sample loading normalisation
+
+sample_normalisation <- function(data_raw, norm_factors = NULL, return_factors = FALSE) {
+  # Step 1: If no external normalization factors are provided, calculate them from the current dataset
+  if (is.null(norm_factors)) {
+    global_mean <- data_raw %>%
+      group_by(sample) %>%
+      summarise(total_intensity = sum(count)) %>%
+      summarise(global_mean = mean(total_intensity)) %>%
+      pull(global_mean)
+    
+    norm_factors <- data_raw %>%
+      group_by(sample) %>%
+      summarise(sample_total = sum(count)) %>%
+      mutate(norm_factor = global_mean / sample_total)
+  }
+  
+  # Return only the normalization factors if requested
+  if (return_factors) {
+    return(norm_factors)
+  }
+  
+  # Step 2: Perform sample loading normalization using the provided or calculated norm_factor
+  data_normalised <- data_raw %>%
+    left_join(norm_factors, by = "sample") %>%
+    mutate(normalised_count = count * norm_factor) %>%
+    mutate(log2_count = log2(count),  # Log2 of the original count
+           log2_normcount = log2(normalised_count)) %>%
+    select(-norm_factor, -sample_total)  # Remove unneeded columns
+  
+  return(data_normalised)
+}
+
+
+#Usage, proteome needs to be run first
+#For proteomics data, calculate normalization factors as usual. For phosphoproteomics data, use the normalization factors from the proteomics data
+#mouse
+long_mprotdata <- sample_normalisation(long_mprotdata)
+
+# Get normalization factors from proteomics data
+norm_factors_mprot <- sample_normalisation(long_mprotdata, return_factors = TRUE)
+# Apply normalization factors from proteomics to phosphoproteomics data
+long_mphosdata <- sample_normalisation(long_mphosdata, norm_factors = norm_factors_mprot)
+
+#human
+long_hprotdata <- sample_normalisation(long_hprotdata)
+
+# Get normalization factors from proteomics data
+norm_factors_hprot <- sample_normalisation(long_hprotdata, return_factors = TRUE)
+# Apply normalization factors from proteomics to phosphoproteomics data
+long_hphosdata <- sample_normalisation(long_hphosdata, norm_factors = norm_factors_hprot)
+
+
+```
+
+```{r raw data box}
+
+#See what raw data looks like 
+
+mprotunnorm_box <- boxplotTMT(long_mprotdata, count) + labs(title = "M prot")
+hprotunnorm_box <- boxplotTMT(long_hprotdata, count) + labs(title = "H prot")
+mphosunnorm_box <- boxplotTMT(long_mphosdata, count) + labs(title = "M phos")
+hphosunnorm_box <- boxplotTMT(long_hphosdata, count) + labs(title = "H phos")
+
+grid.arrange(mprotunnorm_box,hprotunnorm_box,mphosunnorm_box,hphosunnorm_box)
+
+```
+
+```{r raw data density}
+mprotunnorm_dens <- norm_dens(long_mprotdata, count) + labs(title = "M prot")
+hprotunnorm_dens <- norm_dens(long_hprotdata, count) + labs(title = "H prot")
+mphosunnorm_dens <- norm_dens(long_mphosdata, count) + labs(title = "M phos")
+hphosunnorm_dens <- norm_dens(long_hphosdata, count) + labs(title = "H phos")
+
+grid.arrange(mprotunnorm_dens,hprotunnorm_dens,mphosunnorm_dens,hphosunnorm_dens)
+```
+
+```{r norm data box }
+#See what norm data looks like 
+
+mprotnorm_box <- boxplotTMT(long_mprotdata, normalised_count) + labs(title = "M prot")
+hprotnorm_box <- boxplotTMT(long_hprotdata, normalised_count) + labs(title = "H prot")
+mphosnorm_box <- boxplotTMT(long_mphosdata, normalised_count) + labs(title = "M phos")
+hphosnorm_box <- boxplotTMT(long_hphosdata, normalised_count) + labs(title = "H phos")
+
+grid.arrange(mprotnorm_box,hprotnorm_box,mphosnorm_box,hphosnorm_box)
+
+```
+
+```{r norm data density}
+mprotnorm_dens <- norm_dens(long_mprotdata, normalised_count) + labs(title = "M prot")
+hprotnorm_dens <- norm_dens(long_hprotdata, normalised_count) + labs(title = "H prot")
+mphosnorm_dens <- norm_dens(long_mphosdata, normalised_count) + labs(title = "M phos")
+hphosnorm_dens <- norm_dens(long_hphosdata, normalised_count) + labs(title = "H phos")
+
+grid.arrange(mprotnorm_dens,hprotnorm_dens,mphosnorm_dens,hphosnorm_dens)
+
+
+```
+
+
+```{r  Cluster plots}
+
+mds_data <- long_mphosdata %>%
+    select(-normalised_count, -log2_count, -log2_normcount) %>%
+    pivot_wider(names_from = sample, values_from = count) %>%
+    select(-1) %>%
+    as.data.frame()  # Ensure it's a data frame
+
+plot_mds <- function(data, count_column) {
+  # Ensure the specified column exists in the dataframe
+  # Step 3: Pivot the data to wide format
+  mds_data <- data %>%
+    select(-normalised_count, -log2_count, -log2_normcount) %>%
+    pivot_wider(names_from = sample, values_from = count) %>%
+    select(-1) %>%
+    as.data.frame()  # Ensure it's a data frame
+  
+  mds_data <- log2(mds_data + 1)  # Log2 transformation (add 1 to avoid log(0))
+  
+  # Step 5: Plot MDS
+  plotMDS(mds_data, main = "MDS Clusters by TMT Experiment")
+}
+
+
+mprot_mds <- plot_mds(long_mprotdata, "count")
+hprot_mds <- plot_mds(long_hprotdata, "count")
+mphos_mds <- plot_mds(long_mphosdata, "count")
+hphos_mds <- plot_mds(long_hphosdata, "count")
+
+
+```
+
+```{r}
+
+mprotnorm_mds <- plot_mds(long_mprotdata, "normalised_count")
+hprotnorm_mds <- plot_mds(long_hprotdata, "normalised_count")
+mphosnorm_mds <- plot_mds(long_mphosdata, "normalised_count")
+hphosnorm_mds <- plot_mds(long_hphosdata, "normalised_count")
+
+
+```
+
+```{r export data for adaptation changes, to do statistical tests in Prism}
+
+#function to produce dataframe ready calculate fold changes
+append_conditions <- function(data) {
+  # Extract the replicate numbers
+  data <- data %>%
+    mutate(condition = case_when(
+      str_detect(sample, "up") ~ "up",
+      str_detect(sample, "low") ~ "low",
+      str_detect(sample, "high") ~ "high",
+      str_detect(sample, "down") ~ "down",
+      TRUE ~ NA_character_)) %>%
+    mutate(replic = case_when(
+      str_detect(sample, "_1") ~ "1",
+      str_detect(sample, "_2") ~ "2",
+      str_detect(sample, "_3") ~ "3",
+      TRUE ~ NA_character_)) 
+  }
+
+wide_mprotdata <-append_conditions(long_mprotdata)
+wide_hprotdata <-append_conditions(long_hprotdata)
+wide_mphosdata <-append_conditions(long_mphosdata)
+wide_hphosdata <-append_conditions(long_hphosdata)
+
+hvl_av_calc <- function(df1, low_prefix1, high_prefix1, species1) {
+  
+  # Calculate fold changes for the first dataframe
+  df1 <- df1 %>%
+    mutate(
+      fold_change_1 = !!sym(paste0(high_prefix1, "_1")) - !!sym(paste0(low_prefix1, "_1")),
+      fold_change_2 = !!sym(paste0(high_prefix1, "_2")) - !!sym(paste0(low_prefix1, "_2")),
+      fold_change_3 = !!sym(paste0(high_prefix1, "_3")) - !!sym(paste0(low_prefix1, "_3")),
+      avg_fold_change = (fold_change_1 + fold_change_2 + fold_change_3) / 3,
+    )
+}
+
+hphoshvl2 <- hvl_av_calc(hphoshvl, "Hlow", "Hhigh") 
+mphoshvl2 <- hvl_av_calc(mphoshvl, "Mlow", "Mhigh")
+hprothvl2 <- hvl_av_calc(hprothvl, "Hlow", "Hhigh") 
+mprothvl2 <- hvl_av_calc(mprothvl, "Mlow", "Mhigh")
+
+hvl_av_category <- function(df){
+  
+  df <- df %>% 
+    mutate(directionfc = case_when(
+      avg_fold_change > 0 & pVal < 0.05 ~ 1,
+      avg_fold_change < 0 & pVal < 0.05 ~ 2,
+      #qVal > 0.05 | log2_avg_upfc > 0 & log2_avg_downfc < 0 & qVal < 0.05 ~ 3,
+      pVal > 0.05  ~ 3,
+    TRUE ~ NA_real_  # Handle any remaining cases, assigning NA
+  )) }
+
+mphoshvlavs <- hvl_av_category(mphoshvl2)
+hphoshvlavs <- hvl_av_category(hphoshvl2)
+mprothvlavs <- hvl_av_category(mprothvl2)
+hprothvlavs <- hvl_av_category(hprothvl2)
+
+
+
+#adaptation calculations 
+#function for exporting
+widerforhvl <- function(x){
+  x %>% select(id, sample, log2_normcount) %>%
+    filter(str_detect(sample, 'high|low')) %>%
+    pivot_wider(names_from = sample, values_from = log2_normcount) 
+}
+
+#use adaptation function and save as csv, ready for ANOVA/t-test in another software
+wide_mprotdata <-widerforhvl(long_mprotdata)
+wide_mprotdata <- select(mprotdata, id:Gene.names) %>%
+  left_join(wide_mprotdata, mprotdata, by = "id") %>%
+  write.csv("./Processed data/mouse_prot_SLnorm_hvl.csv", row.names = F)
+
+wide_hprotdata <-widerforhvl(long_hprotdata)
+wide_hprotdata <- select(hprotdata, id:Gene.names) %>%
+  left_join(wide_hprotdata, hprotdata, by = "id") %>%
+  write.csv("./Processed data/human_prot_SLnorm_hvl.csv", row.names = F)
+
+wide_mphosdata <- widerforhvl(long_mphosdata)
+wide_mphosdata <- select(mphosdata, id:Gene.names, phosphosite, Sequence.window) %>%
+  left_join(wide_mphosdata, mphosdata, by = "id") %>%
+  write.csv("./Processed data/mouse_phos_SL(prot)norm_hvl.csv", row.names = F)
+
+wide_hphosdata <- widerforhvl(long_hphosdata)
+wide_hphosdata <- select(hphosdata, id:Gene.names, phosphosite, Sequence.window) %>%
+  left_join(wide_hphosdata, hphosdata, by = "id") %>%
+  write.csv("./Processed data/human_phos_SL(prot)norm_hvl.csv", row.names = F)
+
+```
+
+```{r r export data for acute changes, to do statistical tests in Prism}
+#acute calculations
+
+
+##functions to calculate fold changes and their averages
+calculate_fold_changes <- function(data) {
+  x <- data %>%
+    group_by(id, replic) %>%
+    summarise(
+      up_low = normalised_count[condition == "up"] / normalised_count[condition == "low"],
+      down_high = normalised_count[condition == "down"] / normalised_count[condition == "high"],
+      high_low = normalised_count[condition == "high"] / normalised_count[condition == "low"],
+      .groups = "drop"
+    ) %>%
+    mutate(up_low_log2 = log2(up_low),
+          down_high_log2 = log2(down_high),
+          high_low_log2 = log2(high_low)) 
+
+  # Calculate the mean of up_low and down_high for each id
+  y <- x %>% group_by(id) %>%
+  summarise(
+    mean_up_low = mean(up_low),
+    mean_down_high = mean(down_high),
+    mean_high_low = mean(high_low)
+  ) %>%
+  # Log2 transform the mean values
+  mutate(
+    log2_avg_upfc = log2(mean_up_low),
+    log2_avg_downfc = log2(mean_down_high),
+    log2_avg_high_low = log2(mean_high_low)) %>%
+    # # Calculate the ratio of log2 transformed values
+    # value_ac = log2_avg_upfc / log2_avg_downfc,
+    # # Add a direction: 1 if > 1, -1 if < 1
+    # value_ac = ifelse(value_ac)) %>%
+    select(id, log2_avg_upfc, log2_avg_downfc, log2_avg_high_low)
+  
+    z <-  left_join(x, y, by = "id") %>%
+     select(id, replic, up_low_log2, down_high_log2, high_low_log2, log2_avg_upfc, log2_avg_downfc, log2_avg_high_low) %>%
+      pivot_wider(
+      names_from = replic,
+      values_from = c(up_low_log2, down_high_log2, high_low_log2),
+      names_glue = "{.value}_rep{replic}") %>%
+  # Ensure direction is unique per id
+  group_by(id) %>%
+  summarise(across(everything(), first))
+     }
+
+
+#adaptation calculations 
+#function for exporting
+widerforhvl <- function(x){
+  x %>% select(id, sample, log2_normcount) %>%
+    filter(str_detect(sample, 'high|low')) %>%
+    pivot_wider(names_from = sample, values_from = log2_normcount) 
+}
+
+#use adaptation function and save as csv, ready for ANOVA/t-test in another software
+wider_mprotdata <-widerforhvl(long_mprotdata)
+wider_hprotdata <-widerforhvl(long_hprotdata)
+wider_mphosdata <- widerforhvl(long_mphosdata)
+wider_hphosdata <- widerforhvl(long_hphosdata)
+
+
+
+# Apply the functions to calculate fold changes ready for ANOVA testing in a wide table format, and save the csvs for this
+mprot_FCs <- calculate_fold_changes(wide_mprotdata)
+
+mprot_FCs2 <- left_join(
+  select(mprotdata, id:Gene.names),
+  select(mprot_FCs, id, up_low_log2_rep1:down_high_log2_rep3, log2_avg_upfc, log2_avg_downfc), 
+  by = "id") %>%
+  write.csv("./Processed data/mouse_prot_SL(prot)norm_FC.csv", row.names = F)
+
+mprot_hvlFCs <- left_join(
+  select(mprotdata, id:Gene.names),
+  select(wider_mprotdata, id,Mhigh_1:Mhigh_3, Mlow_1:Mlow_3)) %>%
+  left_join(
+  select(mprot_FCs, id, high_low_log2_rep1:high_low_log2_rep3, log2_avg_high_low), 
+  by = "id") %>%
+  write.csv("./Processed data/mouse_prot_SL(prot)norm_hvl.csv", row.names = F)
+
+hprot_FCs <- calculate_fold_changes(wide_hprotdata)
+
+hprot_FCs2 <- left_join(
+  select(hprotdata, id:Gene.names),
+  select(hprot_FCs, id, up_low_log2_rep1:down_high_log2_rep3, log2_avg_upfc, log2_avg_downfc), 
+  by = "id") %>%
+  write.csv("./Processed data/human_prot_SL(prot)norm_FC.csv", row.names = F)
+
+hprot_hvlFCs <- left_join(
+  select(hprotdata, id:Gene.names),
+  select(wider_hprotdata, id,Hhigh_1:Hhigh_3, Hlow_1:Hlow_3)) %>%
+  left_join(
+  select(hprot_FCs, id, high_low_log2_rep1:high_low_log2_rep3, log2_avg_high_low), 
+  by = "id") %>%
+  write.csv("./Processed data/human_prot_SL(prot)norm_hvl.csv", row.names = F)
+
+mphos_FCs <- calculate_fold_changes(wide_mphosdata)
+
+mphos_FCs2 <- left_join(
+  select(mphosdata, id:Gene.names, phosphosite, Sequence.window),
+  select(mphos_FCs, id, up_low_log2_rep1:down_high_log2_rep3, log2_avg_upfc, log2_avg_downfc), 
+  by = "id") %>%
+  write.csv("./Processed data/mouse_phos_SL(prot)norm_FC.csv", row.names = F)
+
+mphos_hvlFCs <- left_join(
+  select(mphosdata, id:Gene.names, phosphosite, Sequence.window),
+  select(wider_mphosdata, id,Mhigh_1:Mhigh_3, Mlow_1:Mlow_3)) %>%
+  left_join(
+  select(mphos_FCs, id, high_low_log2_rep1:high_low_log2_rep3, log2_avg_high_low), 
+  by = "id") %>%
+  write.csv("./Processed data/mouse_phos_SL(prot)norm_hvl.csv", row.names = F)
+
+hphos_FCs <- calculate_fold_changes(wide_hphosdata)
+
+hphos_FCs2 <- left_join(
+  select(hphosdata, id:Gene.names, phosphosite, Sequence.window),
+  select(hphos_FCs, id, up_low_log2_rep1:down_high_log2_rep3, log2_avg_upfc, log2_avg_downfc), 
+  by = "id") %>%
+  write.csv("./Processed data/human_phos_SL(prot)norm_FC.csv", row.names = F)
+
+hphos_hvlFCs <- left_join(
+  select(hphosdata, id:Gene.names, phosphosite, Sequence.window),
+  select(wider_hphosdata, id,Hhigh_1:Hhigh_3, Hlow_1:Hlow_3)) %>%
+  left_join(
+  select(hphos_FCs, id, high_low_log2_rep1:high_low_log2_rep3, log2_avg_high_low), 
+  by = "id") %>%
+  write.csv("./Processed data/human_phos_SL(prot)norm_hvl.csv", row.names = F)
+
+###now take all data to Prism for stats
+
+```
+
+
+
+
+```{r categorisation of data and save}
+#
+
+mphosacute <- read.csv("./Processed data/2mouse_phos_SL(prot)norm_FC.csv")
+hphosacute <- read.csv("./Processed data/2human_phos_SL(prot)norm_FC.csv")
+mprotacute <- read.csv("./Processed data/2mouse_prot_SL(prot)norm_FC.csv")
+hprotacute <- read.csv("./Processed data/2human_prot_SL(prot)norm_FC.csv")
+
+mphosadapt <- read.csv("./Processed data/2mouse_phos_SL(prot)norm_hvl.csv")
+hphosadapt <- read.csv("./Processed data/2human_phos_SL(prot)norm_hvl.csv")
+mprotadapt <- read.csv("./Processed data/2mouse_prot_SL(prot)norm_hvl.csv")
+hprotadapt <- read.csv("./Processed data/2human_prot_SL(prot)norm_hvl.csv")
+
+
+fc_av_category <- function(df){
+  
+df %>% 
+    mutate(directionfc = case_when(
+      log2_avg_upfc > 0 & log2_avg_downfc < 0 & qVal < 0.05 ~ "PROP", #prop
+      log2_avg_upfc < 0 & log2_avg_downfc > 0 & qVal < 0.05 ~ "INV", #inv
+      #qVal > 0.05 | log2_avg_upfc > 0 & log2_avg_downfc < 0 & qVal < 0.05 ~ "",
+      -(log2_avg_upfc > 0 & log2_avg_downfc < 0 & qVal < 0.05) | !(log2_avg_upfc < 0 &log2_avg_downfc > 0 & qVal < 0.05)  ~ "OTHER",
+    TRUE ~ NA_character_  # Handle any remaining cases, assigning NA
+  )) }
+
+mphosacute <- fc_av_category(mphosacute)
+write.csv(mphosacute, "./Processed data/3mouse_phos_SL(prot)norm_FC.csv", row.names = F)
+hphosacute <- fc_av_category(hphosacute)
+write.csv(hphosacute, "./Processed data/3human_phos_SL(prot)norm_FC.csv", row.names = F)
+mprotacute <- fc_av_category(mprotacute)
+write.csv(mprotacute, "./Processed data/3mouse_prot_SL(prot)norm_FC.csv", row.names = F)
+hprotacute <- fc_av_category(hprotacute)
+write.csv(hprotacute, "./Processed data/3human_prot_SL(prot)norm_FC.csv", row.names = F)
+
+
+# hphosavs <- fc_av_category(hphosavs)
+# mprotavs <- fc_av_category(mprotavs)
+# hprotavs <- fc_av_category(hprotavs)
+
+
+hvl_av_category <- function(df){
+  
+  df <- df %>% 
+    mutate(directionfc = case_when(
+      log2_avg_high_low > 0 & qVal < 0.05 ~ "UP",
+      log2_avg_high_low < 0 & qVal < 0.05 ~ "DOWN",
+      #qVal > 0.05 | log2_avg_upfc > 0 & log2_avg_downfc < 0 & qVal < 0.05 ~ 3,
+      qVal > 0.05  ~ "OTHER",
+    TRUE ~ NA_character_  # Handle any remaining cases, assigning NA
+  )) }
+
+mphosadapt <- hvl_av_category(mphosadapt)
+write.csv(mphosadapt, "./Processed data/3mouse_phos_SL(prot)norm_hvl.csv", row.names = F)
+hphosadapt <- hvl_av_category(hphosadapt)
+write.csv(hphosadapt, "./Processed data/3human_phos_SL(prot)norm_hvl.csv", row.names = F)
+mprotadapt <- hvl_av_category(mprotadapt)
+write.csv(mprotadapt, "./Processed data/3mouse_prot_SL(prot)norm_hvl.csv", row.names = F)
+hprotadapt <- hvl_av_category(hprotadapt)
+write.csv(hprotadapt, "./Processed data/3human_prot_SL(prot)norm_hvl.csv", row.names = F)
+
+
+# hphoshvlavs <- hvl_av_category(hphoshvl2)
+# mprothvlavs <- hvl_av_category(mprothvl2)
+# hprothvlavs <- hvl_av_category(hprothvl2)
+
+```
+
+
+```{r}
+
+```
+

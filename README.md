@@ -1,4 +1,7 @@
 # temperature
+
+**NB code and data for the revised manuscript can be found in the /revision branch**
+
 A repository for data from Beale et al, **Thermosensitivity of translation underlies the mammalian nocturnal-diurnal switch**, _BioRxiv_ 2023 (https://www.biorxiv.org/content/10.1101/2023.06.22.546020v1)
 
 Custom analysis of temperature shift proteomics and phosphoproteomics experiments in primary biologically replicate human and mouse fibroblasts. This code accompanies the manuscript published on bioRxiv, which provides experimental design. Much of the code in this repository was adapted from David Wong /github.com/davwong47/Circadian-proteomics to this particular set of experiments. It is made public for transparency.
